@@ -27,7 +27,7 @@ def test_separate_routing(monkeypatch, physics, opf, pf):
     import powersim.solver as module
     calls = []
     def stop(name):
-        def called(net):
+        def called(net, **kwargs):
             calls.append(name)
             raise RuntimeError("routing probe")
         return called
@@ -67,11 +67,14 @@ def test_contract_costs_order_and_structural_identity():
 @pytest.mark.parametrize("physics,benchmark", [("dc", "case30"), ("dc", "case14"), ("ac", "case30"), ("ac", "case14")])
 def test_real_reference(physics, benchmark):
     c = SimulationConfig(physics, benchmark)
-    r = solve_reference(make_case(c), c)
+    net = make_case(c)
+    r = solve_reference(net, c)
     assert r.status == "ok", r.diagnostics
     assert r.metrics["feasible"]
     assert "ext_grid:0" in r.generation_mw
     assert r.objective > 0
+    assert r.objective == pytest.approx(net.res_cost)
+    assert r.model_id and r.configuration_id and r.input_id
     json.dumps(r.to_dict(), allow_nan=False)
     if physics == "dc":
         assert r.bus_voltage_pu is None
@@ -97,7 +100,9 @@ def test_finite_predictions_and_label_rejection():
     inputs = build_dispatch_inputs(net)
     p = {g.asset_id: 0.0 for g in inputs["generators"]}
     p["ext_grid:0"] = float("nan")
-    assert evaluate_decision(net, DispatchDecision(active_power_mw=p)).status == "failed"
+    failed = evaluate_decision(net, DispatchDecision(active_power_mw=p))
+    assert failed.status == "failed"
+    json.dumps(failed.to_dict(), allow_nan=False)
     r = solve_reference(net)
     ids = [b.asset_id for b in r.branches]
     for broken in (replace(r, status="failed"), replace(r, objective=float("nan")),
@@ -118,6 +123,52 @@ def test_dc_transformer_limits_and_relation():
     assert all(b.limit_percent == 80 for b in r.branches)
 
 
+def test_transformer_pf_violation_respects_configured_limit():
+    c = SimulationConfig(benchmark="case14")
+    net = make_case(c)
+    r = solve_reference(net, c)
+    # Set a tight transformer limit, but evaluate the UNCHANGED decision with PF.
+    net.trafo.at[2, "max_loading_percent"] = .1
+    result = evaluate_decision(net, DispatchDecision(active_power_mw=r.generation_mw), c)
+    assert result.status == "ok"
+    transformer = next(b for b in result.branches if b.asset_id == "trafo:2")
+    assert transformer.limit_percent == .1
+    assert transformer.violated
+    assert not result.metrics["feasible"]
+
+
+def test_invalid_converged_reference_is_not_a_label(monkeypatch):
+    import powersim.solver as module
+    real = module.pp.rundcopp
+    def corrupt(net, **kwargs):
+        real(net, **kwargs)
+        net.res_gen.at[0, "p_mw"] = float("nan")
+    monkeypatch.setattr(module.pp, "rundcopp", corrupt)
+    result = solve_reference(make_case())
+    assert result.status == "failed"
+    assert "Non-finite" in result.diagnostics[0]
+
+
+def test_failed_samples_are_preserved_but_not_training_labels(tmp_path, monkeypatch):
+    import powersim.data as module
+    from powersim.solver import SolveResult
+    real = module.solve_reference
+    calls = []
+    def sometimes(net, config):
+        calls.append(True)
+        if len(calls) == 1:
+            return SolveResult("failed", False, "dc", "opf", .01, ("controlled failure",))
+        return real(net, config)
+    monkeypatch.setattr(module, "solve_reference", sometimes)
+    path = tmp_path/"failures"
+    manifest = generate_dataset(path, DatasetConfig(train_cases=4, validation_cases=2, test_cases=2))
+    records = [json.loads(line) for line in (path/"train.jsonl").read_text().splitlines()]
+    assert records[0]["reference"]["status"] == "failed"
+    assert manifest["splits"]["train"]["failures"][0]["diagnostics"] == ("controlled failure",)
+    _, a = load_dataset(path)
+    assert records[0]["scenario_id"] not in a["train_scenario_ids"]
+
+
 def test_kkt_sensitivity_matches_finite_differences():
     net = make_case()
     r = solve_reference(net)
@@ -134,6 +185,27 @@ def test_kkt_sensitivity_matches_finite_differences():
     r2 = solve_reference(net)
     np.testing.assert_allclose(np.array(list(r2.generation_mw.values())) - list(r.generation_mw.values()),
                                j @ delta, atol=1e-4)
+
+
+def test_active_generator_mask_and_kkt_row():
+    net = make_case()
+    net.gen.at[0, "max_p_mw"] = 20
+    result = solve_reference(net)
+    assert result.status == "ok" and result.active_upper[1]
+    relation = dc_relation(net)
+    gens = build_dispatch_inputs(net)["generators"]
+    j, _ = reference_jacobian([g.cost_quadratic for g in gens], relation,
+                              result.active_lower, result.active_upper, [b.active for b in result.branches])
+    np.testing.assert_allclose(j[1], 0, atol=1e-9)
+    np.testing.assert_allclose(j.sum(axis=0), 1, atol=1e-9)
+
+
+def test_weakly_active_kkt_is_unavailable():
+    from powersim.dc import DCRelation
+    relation = DCRelation(np.zeros((1, 2)), np.zeros((1, 2)), np.zeros(1), ("line:0",), 0)
+    j, condition = reference_jacobian([.5, .5], relation, [True, False], [False, False], [False],
+                                     generation=np.array([0, 1]), cost_linear=np.array([1, 0]))
+    assert condition < 1e10 and j is None
 
 
 def test_dataset_reproducibility_splits_and_normalization(tmp_path):

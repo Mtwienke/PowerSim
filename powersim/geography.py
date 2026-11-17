@@ -54,7 +54,7 @@ class GeoMapping(TypedDict):
 
 class MapResult(TypedDict, total=False):
     status: str
-    bus_voltage_pu: dict[int, float]
+    bus_voltage_pu: dict[int, float] | None
     line_loading_percent: dict[int, float]
 
 SUPPORTED = frozenset({"bus", "line", "trafo", "load", "gen"})
@@ -174,9 +174,10 @@ def _point_trace(
     props = feature["properties"]
     longitude, latitude = feature["geometry"]["coordinates"][:2]
     asset_type = props["asset_type"]
-    measurements = (result or {}).get("bus_voltage_pu", {})
-    raw = measurements.get(props.get("electrical_index", -1)) if asset_type == "bus" else None
-    if raw is None or (result or {}).get("status") != "evaluated":
+    measurements = (result or {}).get("bus_voltage_pu") or {}
+    index = props.get("electrical_index", -1)
+    raw = measurements.get(index, measurements.get(f"bus:{index}")) if asset_type == "bus" else None
+    if raw is None or (result or {}).get("status") not in ("evaluated", "ok"):
         value, label = None, "Unknown (no successful mapped result)"
     elif metric == "voltage deviation":
         value = abs(float(raw) - 1.0)
@@ -203,8 +204,12 @@ def _line_trace(go: Any, feature: GeoFeature, result: MapResult | None, provenan
     longitudes, latitudes = zip(*[position[:2] for position in coordinates])
     measurements = (result or {}).get("line_loading_percent", {})
     index = props.get("electrical_index")
-    raw = measurements.get(index) if index is not None and (result or {}).get("status") == "evaluated" else None
-    color = "#888888" if raw is None else ("#c62828" if float(raw) > 100 else "#2878b5")
+    branches = {b["asset_id"]: b for b in (result or {}).get("branches", [])}
+    branch = branches.get(f"{props['asset_type']}:{index}", {})
+    successful = (result or {}).get("status") in ("evaluated", "ok")
+    raw = branch.get("loading_percent", measurements.get(index)) if index is not None and successful else None
+    limit = branch.get("limit_percent", 100)
+    color = "#888888" if raw is None else ("#c62828" if float(raw) > limit else "#2878b5")
     loading = "Unknown" if raw is None else f"{float(raw):.1f}%"
     hover = (f"{props['asset_type']} {props['asset_id']}<br>loading: {loading}<br>"
              f"limit: {props.get('limit', 'not supplied')}<br>provenance: {provenance}")

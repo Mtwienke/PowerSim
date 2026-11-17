@@ -30,7 +30,7 @@ def make_case(config: SimulationConfig | None = None) -> pp.pandapowerNet:
 def network_fingerprint(net) -> str:
     # Operating points (load P/Q, generator P, results) are NOT model identity.
     # Include complete supported topology, transformer taps, costs and constraints.
-    payload = {}
+    payload = {"sn_mva": float(net.sn_mva), "f_hz": float(net.f_hz)}
     excluded = {"gen": ["p_mw"], "sgen": ["p_mw", "q_mvar"]}
     for name in ("bus", "line", "trafo", "trafo3w", "switch", "gen", "ext_grid",
                  "sgen", "shunt", "poly_cost", "pwl_cost"):
@@ -47,7 +47,7 @@ def generators(net) -> tuple[Generator, ...]:
     result = []
     if len(net.pwl_cost):
         raise ValueError("Research adapter supports polynomial costs, not piecewise-linear costs")
-    if len(net.sgen) and bool(net.sgen.get("controllable", False).any()):
+    if len(net.sgen) and "controllable" in net.sgen and bool(net.sgen.controllable.fillna(False).any()):
         raise ValueError("Controllable sgen is unsupported; renewables must be fixed nodal injections")
     for kind in ("ext_grid", "gen"):
         for index, row in net[kind].sort_index().iterrows():
@@ -64,6 +64,7 @@ def generators(net) -> tuple[Generator, ...]:
                 f"{kind}:{index}", *bounds, float(c.cp1_eur_per_mw),
                 f"bus:{int(row.bus)}", kind, float(c.cp2_eur_per_mw2), float(c.cp0_eur),
                 float(row.get("min_q_mvar", -1e9)), float(row.get("max_q_mvar", 1e9)),
+                float(c.cq0_eur), float(c.cq1_eur_per_mvar), float(c.cq2_eur_per_mvar2),
             ))
     return tuple(result)
 

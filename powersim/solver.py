@@ -7,10 +7,11 @@ from typing import Literal
 import numpy as np
 import pandapower as pp
 from pandapower.pypower.idx_brch import PF, PT, RATE_A
+from pandapower.pypower.idx_bus import GS
 
 from .config import SimulationConfig
 from .contracts import DispatchDecision
-from .network import build_dispatch_inputs, nodal_loads, ordered_buses
+from .network import build_dispatch_inputs, digest, nodal_loads, ordered_buses
 
 # All active masks are local, tolerance-based, and aligned to explicit IDs.
 BOUND_TOL_MW = 1e-3
@@ -49,6 +50,16 @@ class SolveResult:
     slack_adjustment_mw: dict[str, float] = field(default_factory=dict)
     metrics: dict = field(default_factory=dict)
     bus_voltage_pu: dict[str, float] | None = None
+    reactive_generation_mvar: dict[str, float] | None = None
+    active_reactive_lower: tuple[bool, ...] | None = None
+    active_reactive_upper: tuple[bool, ...] | None = None
+    active_voltage_lower: tuple[bool, ...] | None = None
+    active_voltage_upper: tuple[bool, ...] | None = None
+    model_id: str | None = None
+    configuration_id: str | None = None
+    input_id: str | None = None
+    generator_ids: tuple[str, ...] = ()
+    bus_ids: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -92,7 +103,8 @@ def _branches(net, dc: bool) -> tuple[BranchResult, ...]:
 
 
 def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
-    gens = build_dispatch_inputs(net, config)["generators"]
+    inputs = build_dispatch_inputs(net, config)
+    gens, ctx = inputs["generators"], inputs["context"]
     dc = config.physics_mode == "dc"
     realized, reactive = {}, {}
     for g in gens:
@@ -110,7 +122,7 @@ def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
     if len(branches) != expected_branches or len(net.res_bus) != len(net.bus):
         raise ValueError("Incomplete solver output coverage")
     target = realized if proposed is None else proposed
-    raw_balance = sum(target.values()) - sum(nodal_loads(net)) - float((net.shunt.p_mw * net.shunt.step).sum())
+    raw_balance = sum(target.values()) - sum(nodal_loads(net)) - float(net._ppc["bus"][:, GS].sum())
     # AC includes losses; raw balance is diagnostic, not a lossless AC feasibility condition.
     pviol = sum(p < g.p_min_mw-BOUND_TOL_MW or p > g.p_max_mw+BOUND_TOL_MW
                 for g in gens for p in (target[g.asset_id],))
@@ -125,8 +137,8 @@ def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
                                         for g in gens if g.source_type == "ext_grid" or
                                         bool(net.gen.at[int(g.asset_id.split(":")[1]), "slack"])}
     feasible = (pviol == realized_pviol == 0 and not any(b.violated for b in branches)
-                and (abs(raw_balance) <= BALANCE_TOL_MW if dc else
-                     qviol == vviol == 0 and all(abs(v) <= BALANCE_TOL_MW for v in slack.values())))
+                and all(abs(v) <= BALANCE_TOL_MW for v in slack.values())
+                and (abs(raw_balance) <= BALANCE_TOL_MW if dc else qviol == vviol == 0))
     objective = polynomial_objective(net, target, None if dc or proposed is not None else reactive)
     if not math.isfinite(objective):
         raise ValueError("Non-finite objective")
@@ -142,6 +154,14 @@ def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
                  "voltage_violations": vviol, "reactive_violations": qviol,
                  "balance_applicable": dc},
         bus_voltage_pu=vm,
+        reactive_generation_mvar=None if dc else reactive,
+        active_reactive_lower=None if dc else tuple(abs(reactive[g.asset_id]-g.q_min_mvar) <= BOUND_TOL_MW for g in gens),
+        active_reactive_upper=None if dc else tuple(abs(reactive[g.asset_id]-g.q_max_mvar) <= BOUND_TOL_MW for g in gens),
+        active_voltage_lower=None if dc else tuple(abs(vm[f"bus:{i}"]-float(net.bus.at[i, "min_vm_pu"])) <= VOLTAGE_TOL_PU for i in ordered_buses(net)),
+        active_voltage_upper=None if dc else tuple(abs(vm[f"bus:{i}"]-float(net.bus.at[i, "max_vm_pu"])) <= VOLTAGE_TOL_PU for i in ordered_buses(net)),
+        model_id=ctx.network_fingerprint, configuration_id=ctx.configuration_id,
+        input_id=digest({"p": nodal_loads(net), "q": net.load.q_mvar.tolist()}),
+        generator_ids=ctx.controllable_assets, bus_ids=ctx.bus_ids,
     )
 
 
@@ -150,7 +170,7 @@ def solve_reference(net, config: SimulationConfig | None = None) -> SolveResult:
     started = time.perf_counter()
     try:
         build_dispatch_inputs(net, config)  # fail early on unsupported contracts
-        (pp.rundcopp if config.physics_mode == "dc" else pp.runopp)(net)
+        (pp.rundcopp if config.physics_mode == "dc" else pp.runopp)(net, numba=False)
         if not net.OPF_converged:
             raise ValueError("OPF did not converge")
         result = _collect(net, config, "opf", time.perf_counter()-started)
@@ -180,18 +200,23 @@ def evaluate_decision(net, decision: DispatchDecision, config: SimulationConfig 
         for key, value in proposed.items():
             kind, index = key.split(":")
             if kind == "gen":
-                net.gen.at[int(index), "p_mw"] = value
+                scale = float(net.gen.at[int(index), "scaling"])
+                if scale <= 0:
+                    raise ValueError("Controlled generator scaling must be positive")
+                net.gen.at[int(index), "p_mw"] = value/scale
         for key, value in decision.voltage_targets_pu.items():
             if not math.isfinite(value) or value <= 0:
                 raise ValueError("Voltage targets must be finite and positive")
             kind, index = key.split(":")
             net[kind].at[int(index), "vm_pu"] = value
         # PF balances at the slack. Its proposal is retained and discrepancies reported.
-        (pp.rundcpp if config.physics_mode == "dc" else pp.runpp)(net)
+        (pp.rundcpp if config.physics_mode == "dc" else pp.runpp)(net, numba=False)
         if not net.converged:
             raise ValueError("Power flow did not converge")
         return _collect(net, config, "pf", time.perf_counter()-started, proposed)
     except Exception as exc:
+        snapshot = dict(decision.active_power_mw)
+        safe_snapshot = snapshot if all(isinstance(v, (int, float)) and math.isfinite(v) for v in snapshot.values()) else None
         return SolveResult("failed", False, config.physics_mode, "pf", time.perf_counter()-started,
                            (f"{type(exc).__name__}: {exc}",),
-                           proposed_generation_mw=dict(decision.active_power_mw))
+                           proposed_generation_mw=safe_snapshot)

@@ -46,7 +46,8 @@ def dc_relation(net) -> DCRelation:
 
 
 def reference_jacobian(cost_quadratic, relation, active_lower, active_upper,
-                       active_branch, *, condition_limit=1e10):
+                       active_branch, *, condition_limit=1e10,
+                       generation=None, cost_linear=None, branch_flows=None, dual_tolerance=1e-5):
     """KKT derivative of strictly convex DC QP with a locally fixed active set.
 
     Returns (J or None, condition number). Undefined/redundant active sets are
@@ -56,19 +57,28 @@ def reference_jacobian(cost_quadratic, relation, active_lower, active_upper,
     nd = relation.m_d.shape[1]
     rows = [np.ones(ng)]
     rhs = [np.ones(nd)]
+    signs = []
     for i, active in enumerate(np.asarray(active_lower) | np.asarray(active_upper)):
         if active:
             rows.append(np.eye(ng)[i])
             rhs.append(np.zeros(nd))
+            signs.append(-1 if active_lower[i] else 1)
     for i, active in enumerate(active_branch):
         if active:
             rows.append(relation.m_g[i])
             rhs.append(relation.m_d[i])
+            signs.append(1 if branch_flows is None or branch_flows[i] >= 0 else -1)
     a, b = np.asarray(rows), np.asarray(rhs)
     hessian = np.diag(2 * np.asarray(cost_quadratic))
     kkt = np.block([[hessian, a.T], [a, np.zeros((len(a), len(a)))]])
     condition = float(np.linalg.cond(kkt))
     if not np.isfinite(condition) or condition > condition_limit:
         return None, condition
+    if generation is not None and cost_linear is not None and signs:
+        # A is full row rank here. Strict complementarity excludes weakly active
+        # inequalities at which the fixed-active-set derivative may be undefined.
+        multipliers = np.linalg.solve(a @ a.T, -a @ (hessian @ generation + cost_linear))
+        if np.any(np.asarray(signs)*multipliers[1:] <= dual_tolerance):
+            return None, condition
     j = np.linalg.solve(kkt, np.vstack([np.zeros((ng, nd)), b]))[:ng]
     return j, condition

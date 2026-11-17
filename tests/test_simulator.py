@@ -58,7 +58,7 @@ def test_decision_rejects_missing_or_unexpected_generator_keys(setpoints) -> Non
 def test_solver_exception_is_reported_with_type_and_diagnostic(monkeypatch) -> None:
     import powersim.solver as simulator
 
-    def raise_solver_error(net) -> None:
+    def raise_solver_error(net, **kwargs) -> None:
         raise RuntimeError("controlled AC failure")
 
     monkeypatch.setattr(simulator.pp, "runpp", raise_solver_error)
@@ -78,8 +78,8 @@ def test_voltage_and_line_violations_mark_evaluation_infeasible(monkeypatch) -> 
 
     real_runpp = simulator.pp.runpp
 
-    def run_with_violations(net) -> None:
-        real_runpp(net)
+    def run_with_violations(net, **kwargs) -> None:
+        real_runpp(net, **kwargs)
         net.res_bus.loc[:, "vm_pu"] = 1.2
         net.res_line.loc[:, "loading_percent"] = 150.0
 

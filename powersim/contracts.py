@@ -16,6 +16,9 @@ class Generator:
     cost_constant: float = 0.0
     q_min_mvar: float = -1e9
     q_max_mvar: float = 1e9
+    reactive_cost_constant: float = 0.0
+    reactive_cost_linear: float = 0.0
+    reactive_cost_quadratic: float = 0.0
 
 @dataclass(frozen=True)
 class DispatchContext:

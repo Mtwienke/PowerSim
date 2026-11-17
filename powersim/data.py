@@ -6,6 +6,7 @@ from pathlib import Path
 import platform
 
 import numpy as np
+import pandapower as pp
 
 from .config import SimulationConfig
 from .dc import dc_relation, reference_jacobian
@@ -28,6 +29,8 @@ class RenewableConfig:
     wind_capacity_fraction: float = .5
 
     def __post_init__(self):
+        if not all(np.isfinite(v) for v in asdict(self).values()):
+            raise ValueError("Renewable parameters must be finite")
         if not 0 <= self.cut_in_ms < self.rated_ms < self.cut_out_ms:
             raise ValueError("Wind speeds must be ordered")
         if min(self.wind_scale, self.wind_shape, self.solar_alpha, self.solar_beta,
@@ -35,7 +38,7 @@ class RenewableConfig:
             raise ValueError("Distribution/reference parameters must be positive")
         if not 0 < self.pv_performance_ratio <= 1 or not 0 <= self.wind_capacity_fraction <= 1:
             raise ValueError("Invalid renewable capacity/performance fraction")
-        if self.installation_pairs < 1:
+        if not isinstance(self.installation_pairs, int) or self.installation_pairs < 1:
             raise ValueError("installation_pairs must be positive")
 
 
@@ -54,11 +57,11 @@ class DatasetConfig:
     def __post_init__(self):
         if self.simulation.physics_mode != "dc":
             raise ValueError("Paper dataset generation is DC only")
-        if min(self.train_cases, self.validation_cases, self.test_cases) < 1:
+        if not all(isinstance(v, int) and v > 0 for v in (self.train_cases, self.validation_cases, self.test_cases)):
             raise ValueError("Every split must be nonempty")
-        if self.load_std_fraction < 0 or self.load_mean_factor <= 0:
+        if not np.isfinite([self.load_std_fraction, self.load_mean_factor]).all() or self.load_std_fraction < 0 or self.load_mean_factor <= 0:
             raise ValueError("Invalid load distribution")
-        if not self.penetration_rates or any(not 0 <= r <= 1 for r in self.penetration_rates):
+        if not self.penetration_rates or any(not np.isfinite(r) or not 0 <= r <= 1 for r in self.penetration_rates):
             raise ValueError("Invalid nameplate penetration rates")
 
     @classmethod
@@ -100,6 +103,7 @@ def generate_dataset(directory, config: DatasetConfig | None = None):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     net = make_case(config.simulation)
+    pp.to_json(net, str(directory / "network.json"))
     inputs = build_dispatch_inputs(net, config.simulation)
     nominal = np.asarray(nodal_loads(net))
     relation = dc_relation(net)
@@ -122,6 +126,7 @@ def generate_dataset(directory, config: DatasetConfig | None = None):
         "schema_version": "2.0", "configuration": asdict(config), "versions": package_versions(),
         "model_id": inputs["context"].network_fingerprint,
         "configuration_id": inputs["context"].configuration_id,
+        "nominal_gross_load_mw": nominal.tolist(),
         "bus_ids": list(inputs["context"].bus_ids), "generator_ids": [g.asset_id for g in gens],
         "generators": [asdict(g) for g in gens], "branch_ids": relation.branch_ids,
         "installations": [{"bus_id": f"bus:{buses[int(site)]}", "kind": "wind" if i < nwind else "pv",
@@ -129,7 +134,8 @@ def generate_dataset(directory, config: DatasetConfig | None = None):
                                                  1-config.renewable.wind_capacity_fraction)/nwind}
                           for i, site in enumerate(sites)],
         "units": {"x": "MW net load per bus", "y": "MW conventional generation incl. ext_grid",
-                  "objective": "EUR/h", "branch_flows": "MW", "jacobian": "MW/MW"},
+                  "objective": "EUR/h", "branch_flows": "MW", "jacobian": "MW/MW",
+                  "wind_speed": "m/s", "irradiance": "W/m^2"},
         "penetration_definition": "total installed renewable nameplate MW / nominal gross demand MW",
         "realized_penetration_definition": "sample renewable MW / sample gross demand MW",
         "assumptions": ["Independent per-bus load multiplier max(0, Normal(mean_factor, 0.2)); "
@@ -161,6 +167,7 @@ def generate_dataset(directory, config: DatasetConfig | None = None):
                 apply_nodal_loads(net, loads)
                 result = solve_reference(net, config.simulation)
                 record = {"scenario_id": scenario_id, "split": split, "number": number, "net_load_mw": loads.tolist(),
+                          "input_id": digest(loads.tolist()),
                           "gross_load_mw": gross.tolist(), "wind_speed_ms": wind.tolist(),
                           "irradiance_wm2": irradiance.tolist(), "renewable_mw": renewable.tolist(),
                           "installed_capacity_mw": float(capacity), "nameplate_penetration": rate,
@@ -168,9 +175,14 @@ def generate_dataset(directory, config: DatasetConfig | None = None):
                           "reference": result.to_dict()}
                 if valid_label(result, gens, relation.branch_ids):
                     j, condition = reference_jacobian([g.cost_quadratic for g in gens], relation,
-                        result.active_lower, result.active_upper, [b.active for b in result.branches])
+                        result.active_lower, result.active_upper, [b.active for b in result.branches],
+                        generation=np.asarray([result.generation_mw[g.asset_id] for g in gens]),
+                        cost_linear=np.asarray([g.marginal_cost_per_mwh for g in gens]),
+                        branch_flows=[b.p_from_mw for b in result.branches])
                     record["sensitivity"] = {"available": j is not None,
-                                              "kkt_condition": condition if np.isfinite(condition) else None}
+                                              "kkt_condition": condition if np.isfinite(condition) else None,
+                                              "unavailable_reason": None if j is not None else
+                                              "Singular/ill-conditioned KKT or weakly active inequality"}
                     x.append(loads); y.append([result.generation_mw[g.asset_id] for g in gens])
                     lower.append(result.active_lower); upper.append(result.active_upper)
                     active.append([b.active for b in result.branches])
