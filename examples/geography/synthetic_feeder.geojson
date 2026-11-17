@@ -1,0 +1,20 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "schema_version": "1.0", "crs": "EPSG:4326",
+    "geometry_kind": "synthetic geography-based network (illustrative coordinates; not a utility map)",
+    "provenance": "Deterministically authored demonstration coordinates; not surveyed data",
+    "license": "Project demonstration data, CC0-1.0",
+    "basemap": "OpenStreetMap tiles; internet required; © OpenStreetMap contributors",
+    "center_lat": 37.50, "center_lon": -122.20
+  },
+  "features": [
+    {"type":"Feature","properties":{"asset_type":"bus","asset_id":"bus:0","electrical_index":0},"geometry":{"type":"Point","coordinates":[-122.205,37.498]}},
+    {"type":"Feature","properties":{"asset_type":"bus","asset_id":"bus:1","electrical_index":1},"geometry":{"type":"Point","coordinates":[-122.198,37.502]}},
+    {"type":"Feature","properties":{"asset_type":"bus","asset_id":"bus:2","electrical_index":2},"geometry":{"type":"Point","coordinates":[-122.191,37.497]}},
+    {"type":"Feature","properties":{"asset_type":"line","asset_id":"line:0","electrical_index":0,"limit":"case-specific"},"geometry":{"type":"LineString","coordinates":[[-122.205,37.498],[-122.201,37.501],[-122.198,37.502]]}},
+    {"type":"Feature","properties":{"asset_type":"line","asset_id":"line:1","electrical_index":1,"limit":"case-specific"},"geometry":{"type":"LineString","coordinates":[[-122.198,37.502],[-122.194,37.500],[-122.191,37.497]]}},
+    {"type":"Feature","properties":{"asset_type":"load","asset_id":"load:0"},"geometry":{"type":"Point","coordinates":[-122.191,37.497]}},
+    {"type":"Feature","properties":{"asset_type":"gen","asset_id":"gen:0"},"geometry":{"type":"Point","coordinates":[-122.205,37.498]}}
+  ]
+}

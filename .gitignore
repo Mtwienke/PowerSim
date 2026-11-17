@@ -1,0 +1,8 @@
+.venv/
+.desloppify/
+__pycache__/
+*.py[cod]
+*.egg-info/
+scorecard.png
+powersim_research.egg-info/
+.agents/
