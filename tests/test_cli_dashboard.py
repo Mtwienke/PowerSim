@@ -14,7 +14,7 @@ def test_reference_cli(capsys):
 
 def test_basic_cli_never_imports_ml_stack():
     result = subprocess.run([sys.executable, "-c",
-                             "import powersim.cli, sys; assert 'torch' not in sys.modules"],
+                             "import powersim.cli, sys; assert 'torch' not in sys.modules; assert 'streamlit' not in sys.modules"],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 

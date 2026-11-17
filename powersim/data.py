@@ -86,7 +86,7 @@ def solar_capacity_factor(irradiance_wm2, config: RenewableConfig):
 
 def package_versions():
     result = {"python": platform.python_version()}
-    for name in ("powersim-research", "pandapower", "numpy", "scipy", "pandas", "torch"):
+    for name in ("powersim-research", "pandapower", "numpy", "scipy", "pandas", "torch", "numba"):
         try:
             result[name] = version(name)
         except PackageNotFoundError:

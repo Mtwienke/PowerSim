@@ -45,6 +45,12 @@ def ordered_buses(net) -> tuple[int, ...]:
 
 def generators(net) -> tuple[Generator, ...]:
     result = []
+    unsupported = [name for name in ("trafo3w", "dcline", "line_dc", "vsc", "impedance",
+                                     "storage", "ward", "xward", "motor") if name in net and len(net[name])]
+    if unsupported:
+        raise ValueError(f"Unsupported research-adapter devices: {', '.join(unsupported)}")
+    if "controllable" in net.load and bool(net.load.controllable.fillna(False).any()):
+        raise ValueError("OPF loads must be fixed exogenous nodal inputs, not controllable loads")
     if len(net.pwl_cost):
         raise ValueError("Research adapter supports polynomial costs, not piecewise-linear costs")
     if len(net.sgen) and "controllable" in net.sgen and bool(net.sgen.controllable.fillna(False).any()):

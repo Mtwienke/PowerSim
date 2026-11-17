@@ -1,0 +1,10 @@
+# Optional ML extension to the validated basic environment.
+# macOS arm64 / CPython 3.13, verified 2026-11-18.
+# Install: pip install -e '.[dev,ml]' -c constraints-ml-macos-arm64-py313.txt
+-c constraints-macos-arm64-py313.txt
+filelock==4.2.11
+fsspec==2026.9.0
+mpmath==1.3.0
+setuptools==84.2.1
+sympy==1.14.0
+torch==2.15.0

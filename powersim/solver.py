@@ -139,9 +139,12 @@ def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
     feasible = (pviol == realized_pviol == 0 and not any(b.violated for b in branches)
                 and all(abs(v) <= BALANCE_TOL_MW for v in slack.values())
                 and (abs(raw_balance) <= BALANCE_TOL_MW if dc else qviol == vviol == 0))
-    objective = polynomial_objective(net, target, None if dc or proposed is not None else reactive)
+    objective = polynomial_objective(net, target, None if dc else reactive)
     if not math.isfinite(objective):
         raise ValueError("Non-finite objective")
+    maximum_p_violation = max((max(g.p_min_mw-target[g.asset_id], target[g.asset_id]-g.p_max_mw, 0.0) for g in gens), default=0.0)
+    maximum_branch_mw = max((max(abs(b.p_from_mw)-b.limit_mw, 0.0) for b in branches if b.limit_mw is not None), default=0.0) if dc else None
+    maximum_loading_excess = max((max(b.loading_percent-b.limit_percent, 0.0) for b in branches), default=0.0)
     return SolveResult(
         "ok", True, config.physics_mode, operation, elapsed,
         generation_mw=realized, objective=objective, branches=branches,
@@ -152,6 +155,9 @@ def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
                  "realized_generator_bound_violations": realized_pviol,
                  "branch_violations": sum(b.violated for b in branches),
                  "voltage_violations": vviol, "reactive_violations": qviol,
+                 "maximum_generator_bound_violation_mw": maximum_p_violation,
+                 "maximum_branch_violation_mw": maximum_branch_mw,
+                 "maximum_branch_loading_excess_percent": maximum_loading_excess,
                  "balance_applicable": dc},
         bus_voltage_pu=vm,
         reactive_generation_mvar=None if dc else reactive,

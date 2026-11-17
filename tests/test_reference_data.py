@@ -95,6 +95,22 @@ def test_slack_does_not_hide_raw_prediction_error():
     assert e.proposed_generation_mw == p
 
 
+def test_ac_objective_includes_actual_reactive_quadratic_costs():
+    config = SimulationConfig(physics_mode="ac")
+    net = make_case(config)
+    net.poly_cost.loc[:, "cq2_eur_per_mvar2"] = .01
+    reference = solve_reference(net, config)
+    assert reference.status == "ok", reference.diagnostics
+    assert reference.objective == pytest.approx(net.res_cost)
+    inputs = build_dispatch_inputs(net, config)
+    targets = {g.asset_id: float(net.res_bus.at[int(g.bus_id.split(":")[1]), "vm_pu"])
+               for g in inputs["generators"]}
+    evaluation = evaluate_decision(net, DispatchDecision(active_power_mw=reference.generation_mw,
+                                                         voltage_targets_pu=targets), config)
+    assert evaluation.status == "ok"
+    assert evaluation.objective == pytest.approx(reference.objective, rel=1e-6)
+
+
 def test_finite_predictions_and_label_rejection():
     net = make_case()
     inputs = build_dispatch_inputs(net)
@@ -147,6 +163,19 @@ def test_invalid_converged_reference_is_not_a_label(monkeypatch):
     result = solve_reference(make_case())
     assert result.status == "failed"
     assert "Non-finite" in result.diagnostics[0]
+
+
+@pytest.mark.parametrize("unsupported", ["impedance", "controllable_load"])
+def test_unsupported_devices_or_optimized_inputs_fail_explicitly(unsupported):
+    import pandapower as pp
+    net = make_case()
+    if unsupported == "impedance":
+        pp.create_impedance(net, 0, 1, rft_pu=.01, xft_pu=.1, sn_mva=100)
+    else:
+        net.load["controllable"] = True
+    result = solve_reference(net)
+    assert result.status == "failed"
+    assert ("Unsupported" if unsupported == "impedance" else "fixed exogenous") in result.diagnostics[0]
 
 
 def test_failed_samples_are_preserved_but_not_training_labels(tmp_path, monkeypatch):
@@ -224,6 +253,28 @@ def test_dataset_reproducibility_splits_and_normalization(tmp_path):
     assert m["installations"]
     assert m["versions"]["pandapower"]
     assert m["splits"]["train"]["valid"] > 0
+
+
+def test_congested_kkt_branch_identity_and_finite_difference(tmp_path):
+    directory = tmp_path/"congested"
+    config = DatasetConfig(train_cases=12, validation_cases=2, test_cases=2)
+    generate_dataset(directory, config)
+    _, a = load_dataset(directory)
+    candidates = np.flatnonzero(a["train_active_branch"].any(axis=1) & a["train_jacobian_valid"])
+    assert len(candidates), "Preset must actually exercise branch constraints"
+    i = candidates[0]
+    j = a["train_jacobian"][i]
+    active = a["train_active_branch"][i]
+    np.testing.assert_allclose((a["m_g"] @ j)[active], a["m_d"][active], atol=1e-8)
+    net = make_case(config.simulation)
+    x = a["train_x"][i].copy()
+    delta = np.zeros(len(x)); delta[1] = .01
+    apply_nodal_loads(net, x+delta)
+    perturbed = solve_reference(net, config.simulation)
+    assert perturbed.status == "ok"
+    np.testing.assert_array_equal([b.active for b in perturbed.branches], active)
+    np.testing.assert_allclose(np.array(list(perturbed.generation_mw.values()))-a["train_y"][i],
+                               j @ delta, atol=1e-4)
 
 
 def test_conversion_and_nett_load_no_double_count():
