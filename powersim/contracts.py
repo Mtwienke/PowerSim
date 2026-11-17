@@ -10,6 +10,12 @@ class Generator:
     p_min_mw: float
     p_max_mw: float
     marginal_cost_per_mwh: float = 1.0
+    bus_id: str = ""
+    source_type: str = "gen"
+    cost_quadratic: float = 0.0
+    cost_constant: float = 0.0
+    q_min_mvar: float = -1e9
+    q_max_mvar: float = 1e9
 
 @dataclass(frozen=True)
 class DispatchContext:
@@ -18,6 +24,9 @@ class DispatchContext:
     units: tuple[tuple[str, str], ...]
     controllable_assets: tuple[str, ...]
     assumptions: tuple[str, ...] = ()
+    bus_ids: tuple[str, ...] = ()
+    physics_mode: str = "dc"
+    configuration_id: str = ""
 
 @dataclass(frozen=True)
 class DispatchObservation:
@@ -29,6 +38,11 @@ class DispatchObservation:
     total_demand_mw: float
     renewable_available_mw: float
     generators: tuple[Generator, ...]
+    bus_ids: tuple[str, ...] = ()
+    net_load_mw: tuple[float, ...] = ()
+    scenario_id: str = ""
+    physics_mode: str = "dc"
+    configuration_id: str = ""
 
 @dataclass(frozen=True)
 class DispatchDecision:
@@ -50,4 +64,3 @@ class DispatchFailure:
 class DispatchPolicy(Protocol):
     def reset(self, context: DispatchContext) -> None: ...
     def decide(self, observation: DispatchObservation) -> DispatchDecision | DispatchFailure: ...
-

@@ -1,5 +1,18 @@
 # PowerSim
 
+**Research default: IEEE 30, DC physics, numerical DC-OPF.** AC and IEEE 14
+remain selectable. The headless reference/data pipeline is available with:
+
+```sh
+python -m powersim.cli reference
+python -m powersim.cli reference --physics ac --benchmark case14
+python -m powersim.cli dataset artifacts/data --preset smoke
+```
+
+See [research protocol](docs/research.md) for ordering, validation, local
+sensitivities, reproducibility, and explicit differences from Gao et al.
+The older architecture notes below are superseded by that protocol.
+
 ## Change the dispatch logic here: `controllers/my_dispatch.py`
 
 Edit `choose_dispatch(observation)` to implement a policy. It receives immutable typed values in MW and returns a `DispatchDecision` keyed by stable generator IDs, or a typed `DispatchFailure`. The simulator snapshots decisions into JSON-friendly result values, checks authority and setpoint coverage, applies accepted setpoints, runs pandapower AC power flow, then reports realised values and constraint violations. Policy code never receives the live network.

@@ -6,3 +6,5 @@ __pycache__/
 scorecard.png
 powersim_research.egg-info/
 .agents/
+.pytest_cache/
+artifacts/

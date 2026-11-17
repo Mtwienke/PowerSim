@@ -9,12 +9,16 @@ from powersim.contracts import (
 
 def choose_dispatch(observation: DispatchObservation) -> DispatchDecision | DispatchFailure:
     """Renewables first, then conventional generators in stable merit order."""
-    residual = max(0.0, observation.total_demand_mw - observation.renewable_available_mw)
-    targets: dict[str, float] = {}
+    # v2 observations are already NET of fixed renewables.
+    demand = sum(observation.net_load_mw) if observation.net_load_mw else observation.total_demand_mw - observation.renewable_available_mw
+    targets = {gen.asset_id: gen.p_min_mw for gen in observation.generators}
+    residual = demand - sum(targets.values())
+    if residual < -1e-6:
+        return DispatchFailure("minimum_generation", "Demand is below total minimum generation")
     for gen in sorted(observation.generators, key=lambda g: (g.marginal_cost_per_mwh, g.asset_id)):
-        p = min(gen.p_max_mw, max(gen.p_min_mw, residual))
-        targets[gen.asset_id] = p
-        residual -= p
+        addition = min(gen.p_max_mw - gen.p_min_mw, max(0.0, residual))
+        targets[gen.asset_id] += addition
+        residual -= addition
     if residual > 1e-6:
         return DispatchFailure("insufficient_capacity", f"Unserved active demand: {residual:.3f} MW")
     return DispatchDecision(

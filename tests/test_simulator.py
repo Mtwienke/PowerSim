@@ -3,6 +3,7 @@ import pytest
 from controllers.my_dispatch import MyDispatchPolicy
 from powersim.contracts import DispatchDecision, DispatchFailure
 from powersim.simulator import build_dispatch_inputs, evaluate, make_case
+from powersim.config import SimulationConfig
 
 
 def policy_for(response):
@@ -16,12 +17,12 @@ def policy_for(response):
     return FixedPolicy()
 
 
-def test_case_runs_through_policy_and_ac_evaluator() -> None:
+def test_case_runs_through_policy_and_dc_evaluator() -> None:
     result = evaluate(make_case(), MyDispatchPolicy())
 
     assert result["status"] == "evaluated"
     assert "feasible" in result
-    assert "bus_voltage_pu" in result
+    assert result["bus_voltage_pu"] is None
     assert "slack_p_mw" in result
 
 
@@ -55,7 +56,7 @@ def test_decision_rejects_missing_or_unexpected_generator_keys(setpoints) -> Non
 
 
 def test_solver_exception_is_reported_with_type_and_diagnostic(monkeypatch) -> None:
-    import powersim.simulator as simulator
+    import powersim.solver as simulator
 
     def raise_solver_error(net) -> None:
         raise RuntimeError("controlled AC failure")
@@ -65,7 +66,7 @@ def test_solver_exception_is_reported_with_type_and_diagnostic(monkeypatch) -> N
     inputs = build_dispatch_inputs(net)
     decision = DispatchDecision(active_power_mw={asset_id: 0.0 for asset_id in inputs["context"].controllable_assets})
 
-    result = evaluate(net, policy_for(decision))
+    result = evaluate(net, policy_for(decision), config=SimulationConfig(physics_mode="ac"))
 
     assert result["status"] == "power_flow_failed"
     assert result["error_type"] == "RuntimeError"
@@ -73,7 +74,7 @@ def test_solver_exception_is_reported_with_type_and_diagnostic(monkeypatch) -> N
 
 
 def test_voltage_and_line_violations_mark_evaluation_infeasible(monkeypatch) -> None:
-    import powersim.simulator as simulator
+    import powersim.solver as simulator
 
     real_runpp = simulator.pp.runpp
 
@@ -84,7 +85,7 @@ def test_voltage_and_line_violations_mark_evaluation_infeasible(monkeypatch) -> 
 
     monkeypatch.setattr(simulator.pp, "runpp", run_with_violations)
 
-    result = evaluate(make_case(), MyDispatchPolicy())
+    result = evaluate(make_case(), MyDispatchPolicy(), config=SimulationConfig(physics_mode="ac"))
 
     assert result["status"] == "evaluated"
     assert result["feasible"] is False
