@@ -52,6 +52,9 @@ The paper-inspired large preset is opt-in:
 No full experiment suite is launched automatically.
 See [verified smoke results](docs/smoke-results.md) for measured outcomes and
 their intentionally limited interpretation.
+The explicitly requested [full 2026-11-18 suite](docs/full-experiment-results.md)
+also completed: all 57 stages and 42 evaluations. Its results expose important
+feasibility limitations and do not establish reproduction of the paper's claims.
 
 ## What is implemented
 
