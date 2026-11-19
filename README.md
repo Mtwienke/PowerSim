@@ -81,6 +81,9 @@ Generic training defaults and existing model/decoder files remain compatible.
 The completed [IEEE-30 pilot](docs/ieee30-pilot-seed2027.md) follows this schedule
 but **does not reproduce the paper's accuracy or method ranking**; its report
 separates fitting failure, data-definition uncertainties and decoder coverage.
+The subsequent [public-source audit](docs/gao-source-audit.md) found concrete
+numerical differences **and conflicts between the examples and final paper**.
+It preserves both specifications rather than silently mixing their settings.
 
 ## What is implemented
 

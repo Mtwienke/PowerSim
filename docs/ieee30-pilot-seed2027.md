@@ -4,6 +4,13 @@
 one threshold-calibration stage and 36 evaluation passes.**
 Requested scope: IEEE-30 only; Germany-30 is excluded.
 
+**Later source evidence:** the [pinned public-example audit](gao-source-audit.md)
+supersedes statements below that author activation, batching and all numerical
+conventions are wholly unknown. The examples establish several concrete
+differences, but also conflict with the final journal. They were discovered
+**after this frozen run**; its methods, settings, results and negative outcome
+have not been changed.
+
 **Conclusion: the published accuracy and method ranking were not reproduced.**
 The new implementation follows the verified loss definitions and shared-M1
 training schedule much more closely, but this is not yet a faithful numerical

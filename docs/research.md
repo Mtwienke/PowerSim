@@ -8,6 +8,10 @@ The initial implementation and historical suites used the metadata/abstract.
 The full article was supplied on 2026-11-19; the [full-text audit and shared-M1
 pilot](paper-protocol.md) records verified methods, training settings, metric
 interpretation and remaining ambiguities. Historical results are not rewritten.
+The later [public-source audit](gao-source-audit.md) identifies example-specific
+ReLU/batching/per-unit/masking conventions and explicit conflicts with the final
+journal. These are evidence for separately declared controls, not silent changes
+to the implementation described below.
 
 Pandapower is pinned to 3.5.6 because the DC map/branch adapter uses its internal
 PPC ordering and limits. Upgrade deliberately with the real reference/PF,
@@ -254,9 +258,12 @@ proved mathematical infeasibility.
 
 ## Remaining differences from the publication
 
-No claim of matching published accuracy/runtime. The full text now confirms
-method objectives and a two-stage training schedule, but original code,
-seed/placement/cost/limit settings and numerical representation remain unavailable.
+No claim of matching published accuracy/runtime. The full text confirms
+method objectives and a two-stage training schedule. Public example code was
+subsequently found and [audited](gao-source-audit.md), but the full dataset and
+generator remain inaccessible through our anonymous access. Several example
+settings conflict with the journal, so final-paper seed/placement/limit settings
+and numerical training protocol are not yet verified.
 Conversion curves, nameplate interpretation of penetration, IID/OOD design,
 90% thermal stress, independent load/weather draws, decoder widths/norm/threshold
 calibration, activation, batch size and checkpoint selection remain configurable

@@ -6,6 +6,13 @@ DOI [10.1109/TNNLS.2024.3437741](https://doi.org/10.1109/TNNLS.2024.3437741).
 The user supplied the full article on 2026-11-19. Page numbers below are the
 printed article pages. The licensed PDF is not redistributed in this repository.
 
+**Source discovery update, 2026-11-19:** public example code is now available
+and has been [audited at a pinned revision](gao-source-audit.md). It establishes
+example-specific ReLU, batch 50, per-unit interface, sensitivity masking and
+final-epoch behavior, but **conflicts with the journal** on rate, loss norms,
+L3 and decoder architecture/features. “Unspecified” below refers to the journal,
+not absence of all source evidence. Existing defaults and runs are unchanged.
+
 ## Confirmed protocol
 
 Table I and Section V-A/B, p. 8055:
@@ -132,6 +139,11 @@ is not a strict feasibility guarantee. A constant output-head bias leaves
 Jacobian patterns and decoder features unchanged while potentially violating
 balance/bounds. Strict PF audits are retained, with separate branch-event,
 affected-scenario and distinct-branch counts.
+The subsequently discovered public evaluator counts **branch-scenario events
+beyond RATE_A + 1 MW after DCPF slack rebalance**; see the
+[source audit](gao-source-audit.md#branch-violation-metric-a-material-clarification).
+This clarifies the example's convention, not an equivalence to our stricter
+feasibility audits or a verification of the unavailable final-paper run.
 
 ## Run the pilot explicitly
 
