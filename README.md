@@ -85,6 +85,28 @@ The subsequent [public-source audit](docs/gao-source-audit.md) found concrete
 numerical differences **and conflicts between the examples and final paper**.
 It preserves both specifications rather than silently mixing their settings.
 
+## Source-informed full reconstruction suite
+
+The user-authorized [reconstruction protocol](docs/gao-reconstruction-suite.md)
+proceeds without the missing full project. It keeps **Germany excluded**, uses
+explicit 185/230/300 MW capacity and per-unit/ReLU hypotheses, and separately
+reports source-informed, journal-equation and literal-example numerical variants.
+
+```sh
+python -m powersim.reproduction artifacts/gao-reconstruction --plan
+python -m powersim.reproduction artifacts/gao-reconstruction
+# After an interrupted driver and all its children have stopped:
+python -m powersim.reproduction artifacts/gao-reconstruction --resume
+```
+
+This opt-in workload freezes committed source: **18 trainings, 18 decoders,
+165 evaluations**, including new IID/OOD test streams, decoder/fallback
+comparisons and 1 MW FGSM with separately re-solved physical labels.
+`--smoke` runs the same workflow with tiny budgets for plumbing tests, not
+accuracy tuning. Existing datasets, checkpoints and generic defaults are kept.
+`M3-example` is explicitly the Gao branch-penalty comparator, not a claim of
+complete external DeepOPF reproduction.
+
 ## What is implemented
 
 - Validated DC/AC configuration, immutable nodal policy inputs, actual polynomial

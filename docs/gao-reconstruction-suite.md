@@ -149,4 +149,21 @@ DeepOPF and other-system reproduction gaps.
 
 ## Execution results
 
-Pending implementation and the frozen full run.
+Implementation includes opt-in numerical profiles, bounded successful-sample
+collection, physical decoder norms, source-like branch-event reporting, separate
+fixed-target/re-solved-target FGSM metrics and compressed prediction details.
+Historical defaults and saved models remain compatible.
+
+```sh
+python -m powersim.reproduction artifacts/gao-reconstruction --plan
+python -m powersim.reproduction artifacts/gao-reconstruction
+```
+
+The runner freezes committed source and records every stage's input/output
+hashes. `--resume` verifies completed outputs and starts interrupted stages in
+new attempt directories. Do not steal `.suite.lock`; verify the old driver and
+children have stopped first. Source/package/configuration changes require a new
+run, or resumption through the original frozen source/environment.
+
+Preflight and a tiny `--smoke` workflow precede the full run. Full-run results
+will be recorded after completion, not inferred from smoke accuracy.

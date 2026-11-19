@@ -4,6 +4,12 @@ Audited **2026-11-19**. This supersedes earlier statements that no original
 example code was available. Historical runs and their measured results remain
 unchanged. **Germany is excluded from this investigation.**
 
+**Later user decision:** proceed without the expired share or author contact.
+The [predeclared reconstruction suite](gao-reconstruction-suite.md) implements
+explicit hypotheses and separate numerical variants. The audit's original
+“wait for source” recommendation is no longer a blocker, but the evidence
+classification and paper/source conflicts remain unchanged.
+
 ## Source and authority
 
 [AI4POWER/Data-Driven-OPF-Method-Considering-Inherent-Pattern][repo] explicitly
