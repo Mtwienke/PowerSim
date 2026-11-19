@@ -279,3 +279,27 @@ def test_cli_train_exposes_warm_start_and_method(dataset, tmp_path, monkeypatch,
     assert recorded["configuration"]["learning_rate"] == .01
     assert recorded["configuration"]["checkpoint_selection"] == "last"
     capsys.readouterr()
+
+
+def test_read_only_gao_model_snapshots_preserve_checkpoint_and_training_defaults(dataset, parent, tmp_path):
+    from powersim.gao_audit import audit_preprocessing
+
+    before = artifact_hash(parent)
+    defaults = asdict(TrainConfig())
+    report = audit_preprocessing(dataset, tmp_path/"audit", model_paths=[parent])
+    assert artifact_hash(parent) == before
+    assert asdict(TrainConfig()) == defaults
+    model = report["models"][0]
+    assert model["train_validation_data_verified"] is True
+    assert model["sha256"] == before
+    scales = model["splits"]["train"]["supervised_error_units"]
+    assert scales["mse_per_unit2_on_100mw_base"] == pytest.approx(scales["mse_mw2"]/10000, rel=1e-6)
+    assert scales["example_mae_per_unit_on_100mw_base"] == pytest.approx(scales["mae_mw"]/100, rel=1e-6)
+    altered = tmp_path/"changed"
+    shutil.copytree(dataset, altered)
+    _, arrays = load_dataset(altered)
+    arrays["train_y"] += 1
+    np.savez_compressed(altered/"dataset.npz", **arrays)
+    with pytest.raises(ValueError, match="train/validation identity"):
+        audit_preprocessing(altered, tmp_path/"invalid-audit", model_paths=[parent])
+    assert not (tmp_path/"invalid-audit").exists()

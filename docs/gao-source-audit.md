@@ -179,6 +179,28 @@ No access control was bypassed and no author was contacted automatically.
 
 ## Decisions before another run
 
+### Reproducible read-only preprocessing diagnostic
+
+```sh
+python -m powersim.gao_audit DATASET NEW_AUDIT_OUTPUT \
+  --model MATCHING_M1/model.pt --model MATCHING_M5/model.pt
+```
+
+Omit `--model` for a NumPy-only label-policy audit. The command is restricted to
+IEEE-30 DC, reads **training/validation arrays only**, verifies checkpoint/data
+identity when models are supplied, and refuses existing outputs or outputs
+inside the input dataset. It records input/model/code hashes and package
+versions. It never starts an optimizer, generates data, alters a mask used by
+training, modifies defaults, or evaluates held-out accuracy.
+
+The output compares the signed-max sensitivity predicate, reference-label
+energy, physical versus per-unit supervised error, and full-population L1/L2
+reductions at identical saved predictions/weights. These are **diagnostic
+counterfactual loss values**, not a trained source-protocol result, minibatch
+gradient measurement or isolated explanation of the earlier collapse.
+
+### Implementation decisions
+
 1. **Preserve the journal M1/M2/M4/M5 mapping and existing defaults/artifacts.**
    Discovery of MAE examples does not license silently rewriting squared
    journal losses or omitting L3.

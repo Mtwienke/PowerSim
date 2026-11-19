@@ -36,6 +36,26 @@ def test_normalized_chain_rule_and_second_derivatives():
     assert model.layers[0].weight.grad.abs().sum() > 0
 
 
+def test_per_unit_relu_jacobians_have_trainable_mixed_parameter_derivatives():
+    model = OPFNetwork([0, 0], [100, 100], [0, 0], [100, 100],
+                       hidden=(3, 3, 3), activation="relu")
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.fill_(.2)  # Positive preactivations, away from ReLU kinks.
+    x = tensor([[50, 60]]).requires_grad_(True)
+    j = physical_jacobian(model, x)
+    z = (x/100).detach().requires_grad_(True)
+    y_pu = model.normalized_forward(z)
+    j_pu = torch.stack([torch.autograd.grad(y_pu[:, g].sum(), z, create_graph=True,
+                       retain_graph=True)[0] for g in range(2)], dim=1)
+    torch.testing.assert_close(j, j_pu)  # Common input/output unit base cancels.
+    hessian_sum = torch.autograd.grad(j.sum(), x, retain_graph=True)[0]
+    torch.testing.assert_close(hessian_sum, torch.zeros_like(x))
+    (j.sum(dim=1)-1).square().mean().backward()
+    assert model.layers[0].weight.grad.abs().sum() > 0
+    assert model.output.weight.grad.abs().sum() > 0
+
+
 def test_jacobian_identities_and_only_local_active_masks():
     j = tensor([[[.6, .6], [.4, .4]]]).requires_grad_(True)
     mg = tensor([[1, 0], [0, 1]])

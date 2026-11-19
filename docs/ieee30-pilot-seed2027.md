@@ -153,8 +153,10 @@ Feasible-only raw objective gaps are unavailable, not zero.
 
 At 47.24%, M5 has **321 branch-scenario violation events across five distinct
 branches**, mean excess 1.088 MW among events. Do not equate these 321 events
-with the paper's count of violating branches. The paper reports three for M5;
-its exact event/branch aggregation is insufficiently specified.
+with the paper's reported three for M5. The later public-source audit identifies
+an event count **above RATE_A + 1 MW after slack rebalance**, not a distinct-branch
+count. This pilot uses tighter tolerance and 0.9-scaled ratings, so those raw
+counts still do not provide a like-for-like Fig. 6 comparison.
 
 ## Checkpoint sensitivity and fitting failure
 
