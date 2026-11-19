@@ -13,6 +13,7 @@ except ImportError as exc:
     raise ImportError("Training/inference requires: pip install -e '.[ml]'") from exc
 
 from .data import load_dataset, package_versions, write_json
+from .metrics import accuracy
 from .network import digest
 
 
@@ -26,7 +27,39 @@ def artifact_hash(path):
 
 def dataset_identity(manifest):
     return digest({"configuration": manifest["configuration"], "model_id": manifest["model_id"],
-                   "bus_ids": manifest["bus_ids"], "generator_ids": manifest["generator_ids"]})
+                    "bus_ids": manifest["bus_ids"], "generator_ids": manifest["generator_ids"]})
+
+
+METHOD_WEIGHTS = {
+    "baseline": {"L0": 1.0},
+    "physics-guided": {f"L{i}": 1.0 for i in range(6)},
+    "M1": {"L0": 1.0},
+    "M2": {"L0": 1.0, "L1": 1.0},
+    "M4": {f"L{i}": 1.0 for i in range(5)},
+    "M5": {f"L{i}": 1.0 for i in range(6)},
+}
+
+
+def training_data_hash(arrays):
+    """Bind initialization to train/validation data, never to held-out values."""
+    checksum = hashlib.sha256()
+    for name in sorted(arrays):
+        if not (name.startswith(("train_", "validation_")) or
+                name in ("x_mean", "x_scale", "y_mean", "y_scale", "m_g", "m_d", "branch_constant")):
+            continue
+        value = np.ascontiguousarray(arrays[name])
+        checksum.update(f"{name}:{value.dtype}:{value.shape}".encode())
+        checksum.update(value.tobytes())
+    return checksum.hexdigest()
+
+
+def state_dict_hash(state):
+    checksum = hashlib.sha256()
+    for name, value in sorted(state.items()):
+        value = value.detach().cpu().contiguous()
+        checksum.update(f"{name}:{value.dtype}:{tuple(value.shape)}".encode())
+        checksum.update(value.numpy().tobytes())
+    return checksum.hexdigest()
 
 
 class OPFNetwork(nn.Module):
@@ -104,6 +137,7 @@ class TrainConfig:
     seed: int = 2026
     perturb_std_normalized: float = .1
     loss_weights: dict[str, float] = field(default_factory=lambda: {"L0": 1.0})
+    checkpoint_selection: str = "best_validation"
 
     def __post_init__(self):
         if (not all(isinstance(v, int) and v > 0 for v in (self.epochs, self.batch_size))
@@ -118,9 +152,11 @@ class TrainConfig:
             raise ValueError("Unknown loss term")
         if not any(v > 0 for v in self.loss_weights.values()) or any(not np.isfinite(v) or v < 0 for v in self.loss_weights.values()):
             raise ValueError("Loss weights must be finite, nonnegative, with at least one positive")
+        if self.checkpoint_selection not in ("best_validation", "last"):
+            raise ValueError("checkpoint_selection must be best_validation or last")
 
 
-def train_model(dataset, output, config: TrainConfig | None = None):
+def train_model(dataset, output, config: TrainConfig | None = None, *, initialize_from=None):
     config = config or TrainConfig()
     manifest, a = load_dataset(dataset)
     if manifest["configuration"]["simulation"]["physics_mode"] != "dc":
@@ -131,12 +167,43 @@ def train_model(dataset, output, config: TrainConfig | None = None):
     validation_input_ids = [digest(row.tolist()) for row in a["validation_x"]]
     if set(training_input_ids) & set(validation_input_ids):
         raise ValueError("Training and validation contain duplicate nodal inputs")
-    output = Path(output)
-    output.mkdir(parents=True, exist_ok=False)
     torch.manual_seed(config.seed)
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
     model = OPFNetwork(a["x_mean"], a["x_scale"], a["y_mean"], a["y_scale"], config.hidden, config.activation)
+    data_hash = training_data_hash(a)
+    initialization = {"kind": "random", "seed": config.seed,
+                      "optimizer_state": "Fresh Adam; no optimizer state is inherited."}
+    if initialize_from is not None:
+        parent = torch.load(initialize_from, map_location="cpu", weights_only=True)
+        if (parent["dataset_id"] != dataset_identity(manifest) or parent["model_id"] != manifest["model_id"]
+                or parent["bus_ids"] != manifest["bus_ids"] or parent["generator_ids"] != manifest["generator_ids"]
+                or parent["physics_mode"] != "dc"):
+            raise ValueError("Warm-start checkpoint dataset/model/ordering mismatch")
+        if (tuple(parent["configuration"]["hidden"]) != tuple(config.hidden) or
+                parent["configuration"]["activation"] != config.activation):
+            raise ValueError("Warm-start checkpoint architecture mismatch")
+        if (parent["training_scenario_ids"] != a["train_scenario_ids"].tolist() or
+                parent["validation_scenario_ids"] != a["validation_scenario_ids"].tolist() or
+                parent["training_input_ids"] != training_input_ids or parent["validation_input_ids"] != validation_input_ids):
+            raise ValueError("Warm-start checkpoint training/validation inputs mismatch")
+        if parent.get("training_data_sha256", data_hash) != data_hash:
+            raise ValueError("Warm-start checkpoint training/validation data mismatch")
+        for name in ("x_mean", "x_scale", "y_mean", "y_scale"):
+            if not torch.equal(parent["state_dict"][name], getattr(model, name)):
+                raise ValueError("Warm-start checkpoint normalization mismatch")
+        parent_state_hash = state_dict_hash(parent["state_dict"])
+        if parent.get("state_dict_sha256", parent_state_hash) != parent_state_hash:
+            raise ValueError("Warm-start checkpoint state checksum mismatch")
+        model.load_state_dict(parent["state_dict"])
+        initialization.update(
+            kind="checkpoint", checkpoint_path=str(Path(initialize_from).resolve()),
+            checkpoint_sha256=artifact_hash(initialize_from),
+            parent_epoch=parent.get("epoch"), parent_selection=parent.get("checkpoint_selection"),
+            training_data_hash_verified="training_data_sha256" in parent)
+    initialization["state_dict_sha256"] = state_dict_hash(model.state_dict())
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=False)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     # Intentionally address only TRAIN and VALIDATION, never held-out labels.
     x, y = tensor(a["train_x"]), tensor(a["train_y"])
@@ -145,12 +212,20 @@ def train_model(dataset, output, config: TrainConfig | None = None):
     active_g = tensor(a["train_lower"] | a["train_upper"]).bool()
     active_b = tensor(a["train_active_branch"]).bool()
     mg, md = tensor(a["m_g"]), tensor(a["m_d"])
+    validation_x, validation_y = tensor(a["validation_x"]), tensor(a["validation_y"])
+    with torch.no_grad():
+        initial_validation = accuracy(model(validation_x).numpy(), a["validation_y"])
+    # Keep batch order identical across ablations; perturbations cannot advance
+    # the shuffle RNG merely because L5 was enabled.
+    shuffle_rng = torch.Generator().manual_seed(config.seed)
+    perturb_rng = torch.Generator().manual_seed(config.seed)
     history, best, best_state = [], float("inf"), None
+    best_epoch = None
     started = time.perf_counter()
     for epoch in range(config.epochs):
         model.train()
         totals = {f"L{i}": 0.0 for i in range(6)}
-        for indices in torch.randperm(len(x)).split(config.batch_size):
+        for indices in torch.randperm(len(x), generator=shuffle_rng).split(config.batch_size):
             bx = x[indices].detach().requires_grad_(True)
             terms = {"L0": (model(bx)-y[indices]).square().mean()}
             if any(config.loss_weights.get(f"L{i}", 0) > 0 for i in range(1, 5)):
@@ -158,7 +233,8 @@ def train_model(dataset, output, config: TrainConfig | None = None):
                 terms.update(jacobian_losses(j, reference_j[indices], valid_j[indices],
                                              active_g[indices], active_b[indices], mg, md))
             if config.loss_weights.get("L5", 0) > 0:
-                perturbed = (bx.detach()+torch.randn_like(bx)*model.x_scale*config.perturb_std_normalized).requires_grad_(True)
+                noise = torch.randn(bx.shape, generator=perturb_rng)
+                perturbed = (bx.detach()+noise*model.x_scale*config.perturb_std_normalized).requires_grad_(True)
                 jp = physical_jacobian(model, perturbed)
                 # No local L3/L4 masks are extrapolated to unlabeled points.
                 terms["L5"] = (jp.sum(dim=1)-1).square().mean()
@@ -172,22 +248,48 @@ def train_model(dataset, output, config: TrainConfig | None = None):
                 totals[key] += float(value.detach())*len(indices)/len(x)
         model.eval()
         with torch.no_grad():
-            validation = float((model(tensor(a["validation_x"]))-tensor(a["validation_y"])).square().mean())
-        history.append({"epoch": epoch+1, **totals, "validation_mse_mw2": validation})
+            prediction = model(validation_x)
+            validation = float((prediction-validation_y).square().mean())
+            validation_accuracy = accuracy(prediction.numpy(), a["validation_y"])
+        if not np.isfinite(validation):
+            raise ValueError("Non-finite validation loss")
+        history.append({"epoch": epoch+1, **totals, "validation_mse_mw2": validation,
+                        "validation_generator_accuracy_lt_1mw": validation_accuracy["generator_accuracy_lt_1mw"],
+                        "validation_joint_accuracy_lt_1mw": validation_accuracy["joint_accuracy_lt_1mw"]})
         if validation < best:
-            best, best_state = validation, deepcopy(model.state_dict())
-    model.load_state_dict(best_state)
-    checkpoint = {"state_dict": model.state_dict(), "configuration": asdict(config),
-                  "model_id": manifest["model_id"], "dataset_id": dataset_identity(manifest),
-                  "bus_ids": manifest["bus_ids"], "generator_ids": manifest["generator_ids"],
-                  "physics_mode": "dc", "versions": package_versions(),
-                  "training_scenario_ids": a["train_scenario_ids"].tolist(),
-                  "validation_scenario_ids": a["validation_scenario_ids"].tolist(),
-                  "training_input_ids": training_input_ids, "validation_input_ids": validation_input_ids}
-    torch.save(checkpoint, output / "model.pt")
+            best, best_state, best_epoch = validation, deepcopy(model.state_dict()), epoch+1
+    last_state = deepcopy(model.state_dict())
+    checkpoint = {"configuration": asdict(config),
+                   "model_id": manifest["model_id"], "dataset_id": dataset_identity(manifest),
+                   "bus_ids": manifest["bus_ids"], "generator_ids": manifest["generator_ids"],
+                   "physics_mode": "dc", "versions": package_versions(),
+                   "training_data_sha256": data_hash, "initialization": initialization,
+                   "training_scenario_ids": a["train_scenario_ids"].tolist(),
+                   "validation_scenario_ids": a["validation_scenario_ids"].tolist(),
+                   "training_input_ids": training_input_ids, "validation_input_ids": validation_input_ids}
+    selected_state, selected_epoch = ((best_state, best_epoch) if config.checkpoint_selection == "best_validation"
+                                      else (last_state, config.epochs))
+    checkpoints = {}
+    for name, state, epoch, selection in (
+            ("best.pt", best_state, best_epoch, "best_validation"),
+            ("last.pt", last_state, config.epochs, "last"),
+            ("model.pt", selected_state, selected_epoch, config.checkpoint_selection)):
+        torch.save({**checkpoint, "state_dict": state, "epoch": epoch,
+                    "checkpoint_selection": selection, "state_dict_sha256": state_dict_hash(state)}, output / name)
+        checkpoints[name] = {"sha256": artifact_hash(output / name), "epoch": epoch, "selection": selection}
+    model.load_state_dict(selected_state)
+    with torch.no_grad():
+        training_accuracy = accuracy(model(x).numpy(), a["train_y"])
+        validation_accuracy = accuracy(model(validation_x).numpy(), a["validation_y"])
     report = {"configuration": asdict(config), "training_seconds": time.perf_counter()-started,
-              "selection_split": "validation", "best_validation_mse_mw2": best,
-              "history": history, "versions": package_versions(),
+               "selection_split": "validation" if config.checkpoint_selection == "best_validation" else None,
+               "selected_epoch": selected_epoch, "best_epoch": best_epoch,
+               "best_validation_mse_mw2": best, "last_validation_mse_mw2": history[-1]["validation_mse_mw2"],
+               "initialization": initialization, "training_data_sha256": data_hash,
+               "initial_validation_accuracy": initial_validation, "training_accuracy": training_accuracy,
+               "validation_accuracy": validation_accuracy, "checkpoints": checkpoints,
+               "rng_policy": "Independent deterministic initialization, shuffle and perturbation streams.",
+               "history": history, "versions": package_versions(),
               "loss_units": {"L0": "MW^2", **{f"L{i}": "(MW/MW)^2" for i in range(1, 6)}}}
     write_json(output / "training.json", report)
     return report
@@ -206,18 +308,39 @@ def load_model(path):
 class Decoder(nn.Module):
     def __init__(self, feature_width, input_width, hidden=128):
         super().__init__()
-        self.layers = nn.Sequential(nn.Linear(feature_width, hidden), nn.Tanh(), nn.Linear(hidden, input_width))
+        self.hidden = (hidden,) if isinstance(hidden, int) else tuple(hidden)
+        if not self.hidden or any(isinstance(h, bool) or not isinstance(h, int) or h < 1 for h in self.hidden):
+            raise ValueError("Decoder requires positive integer hidden widths")
+        layers = []
+        width = feature_width
+        for next_width in self.hidden:
+            layers.extend([nn.Linear(width, next_width), nn.Tanh()])
+            width = next_width
+        layers.append(nn.Linear(width, input_width))
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, features):
         return self.layers(features)
 
 
+RECONSTRUCTION_SCORES = {
+    "normalized": ("normalized^2", "Mean squared normalized-input reconstruction error"),
+    "mw2": ("MW^2", "Mean squared physical-input reconstruction error"),
+    "mae_mw": ("MW", "Mean absolute physical-input reconstruction error"),
+    "rmse_mw": ("MW", "Root mean squared physical-input reconstruction error"),
+}
+
+
 def reconstruction_errors(model, decoder, x, units="normalized"):
     error = decoder(model.features(x)) - (x-model.x_mean)/model.x_scale
-    if units == "mw2":
+    if units not in RECONSTRUCTION_SCORES:
+        raise ValueError(f"Unknown reconstruction score: {units}")
+    if units != "normalized":
         error = error*model.x_scale
-    elif units != "normalized":
-        raise ValueError("Decoder error units must be normalized or mw2")
+    if units == "mae_mw":
+        return error.abs().mean(dim=-1)
+    if units == "rmse_mw":
+        return error.square().mean(dim=-1).sqrt()
     return error.square().mean(dim=-1)
 
 
@@ -228,24 +351,45 @@ def calibrate_threshold(errors, quantile=.95):
     return float(np.quantile(values, quantile, method="higher"))
 
 
+def _decoder_calibration(errors, units, quantile, threshold):
+    if units not in RECONSTRUCTION_SCORES:
+        raise ValueError(f"Unknown reconstruction score: {units}")
+    if threshold is not None and (not np.isfinite(threshold) or threshold < 0):
+        raise ValueError("Fixed threshold must be finite and nonnegative")
+    calibrated = calibrate_threshold(errors, quantile)
+    score_units, aggregation = RECONSTRUCTION_SCORES[units]
+    return {
+        "threshold": calibrated if threshold is None else float(threshold),
+        "quantile": quantile if threshold is None else None,
+        "calibration_method": "validation_quantile" if threshold is None else "explicit_fixed_threshold",
+        "error_units": units, "score_units": score_units,
+        "aggregation": aggregation + " across all ordered input buses",
+        "validation_thresholds": [calibrate_threshold(errors, q) for q in (.05, .1, .25, .5, .75, .9, .95, .99, 1.)],
+        "warning": "Reconstruction is not an accuracy/feasibility certificate. The paper's MW error norm is unspecified.",
+    }
+
+
 def train_decoder(dataset, model_path, output, *, epochs=100, batch_size=64, hidden=128,
-                  learning_rate=.001, quantile=.95, units="normalized", seed=2026):
-    if min(epochs, batch_size, hidden) < 1 or learning_rate <= 0:
+                   learning_rate=.001, quantile=.95, units="normalized", seed=2026, threshold=None):
+    if (min(epochs, batch_size) < 1 or not np.isfinite(learning_rate) or learning_rate <= 0
+            or units not in RECONSTRUCTION_SCORES):
         raise ValueError("Invalid decoder settings")
+    # Validate before creating artifacts, including explicit fixed thresholds.
+    _decoder_calibration([0.], units, quantile, threshold)
     manifest, a = load_dataset(dataset)
     model, checkpoint = load_model(model_path)
     if dataset_identity(manifest) != checkpoint["dataset_id"]:
         raise ValueError("Decoder must use the OPF model's training/validation dataset")
     if not len(a["validation_x"]):
         raise ValueError("Decoder calibration requires validation inputs")
-    output = Path(output)
-    output.mkdir(parents=True, exist_ok=False)
     torch.manual_seed(seed)
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
     for p in model.parameters():
         p.requires_grad_(False)
     decoder = Decoder(model.hidden[-2], len(model.x_mean), hidden)
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=False)
     optimizer = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
     train_x, val_x = tensor(a["train_x"]), tensor(a["validation_x"])
     with torch.no_grad():
@@ -267,12 +411,12 @@ def train_decoder(dataset, model_path, output, *, epochs=100, batch_size=64, hid
     decoder.load_state_dict(best_state)
     with torch.no_grad():
         errors = reconstruction_errors(model, decoder, val_x, units).numpy()
-    threshold = calibrate_threshold(errors, quantile)
-    metadata = {"hidden": hidden, "epochs": epochs, "batch_size": batch_size,
-                "learning_rate": learning_rate, "seed": seed, "quantile": quantile,
-                "threshold": threshold, "error_units": units,
-                "aggregation": "mean squared reconstruction error across all ordered input buses",
-                "calibration_split": "validation", "opf_frozen": True,
+    metadata = {"hidden": decoder.hidden[0] if len(decoder.hidden) == 1 else list(decoder.hidden),
+                 "hidden_layers": list(decoder.hidden), "epochs": epochs, "batch_size": batch_size,
+                 "learning_rate": learning_rate, "seed": seed,
+                 **_decoder_calibration(errors, units, quantile, threshold),
+                 "calibration_split": "validation", "opf_frozen": True,
+                 "training_loss": "Mean squared normalized-input reconstruction error",
                 "feature_layer": "penultimate hidden layer (hidden[-2])",
                 "model_hash": artifact_hash(model_path), "dataset_id": checkpoint["dataset_id"],
                 "validation_scenario_ids": a["validation_scenario_ids"].tolist(),
@@ -287,12 +431,12 @@ def load_decoder(path, model_path, model):
     meta = checkpoint["metadata"]
     if meta["model_hash"] != artifact_hash(model_path):
         raise ValueError("Decoder belongs to a different OPF checkpoint")
-    decoder = Decoder(model.hidden[-2], len(model.x_mean), meta["hidden"])
+    decoder = Decoder(model.hidden[-2], len(model.x_mean), meta.get("hidden_layers", meta["hidden"]))
     decoder.load_state_dict(checkpoint["state_dict"])
     return decoder.eval(), meta
 
 
-def recalibrate_decoder(dataset, model_path, decoder_path, output, *, quantile=.95, units=None):
+def recalibrate_decoder(dataset, model_path, decoder_path, output, *, quantile=.95, units=None, threshold=None):
     """Explicit threshold-only operation; never fit on test or production data."""
     manifest, arrays = load_dataset(dataset)
     model, checkpoint = load_model(model_path)
@@ -303,10 +447,10 @@ def recalibrate_decoder(dataset, model_path, decoder_path, output, *, quantile=.
     units = units or metadata["error_units"]
     with torch.no_grad():
         errors = reconstruction_errors(model, decoder, validation_x, units).numpy()
-    threshold = calibrate_threshold(errors, quantile)
+    calibration = _decoder_calibration(errors, units, quantile, threshold)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
-    metadata = {**metadata, "quantile": quantile, "threshold": threshold, "error_units": units,
+    metadata = {**metadata, **calibration,
                 "calibration_split": "validation",
                 "validation_scenario_ids": arrays["validation_scenario_ids"].tolist()}
     torch.save({"state_dict": decoder.state_dict(), "metadata": metadata}, output / "decoder.pt")

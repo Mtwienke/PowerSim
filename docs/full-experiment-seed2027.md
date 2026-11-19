@@ -2,6 +2,9 @@
 
 **Completed 2026-11-19: 114/114 stages, 84/84 evaluations in 32 min 29 s.**
 All **324 required stage output hashes** were verified afterward; no mismatches.
+Subsequent [full-text analysis](paper-protocol.md) identified a different paper
+training schedule and strong evidence for generator-wise accuracy aggregation.
+The historical joint-scenario metrics and all run artifacts below remain unchanged.
 No stage failed. All PF audits and fallbacks on reference-valid evaluation
 samples returned successfully; this does not imply the learned vectors were
 feasible.

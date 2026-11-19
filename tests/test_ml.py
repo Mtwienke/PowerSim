@@ -126,7 +126,9 @@ def test_short_cpu_training_decoder_and_evaluation(dataset, tmp_path):
     parallel = evaluate_model(dataset, model_path, tmp_path/"parallel", workers=2,
                               decoder_path=tmp_path/"decoder"/"decoder.pt")
     for metric in ("raw_accuracy", "hybrid_accuracy", "raw_physics", "hybrid_physics",
-                   "decoder_acceptance_rate", "fallback_rate"):
+                   "decoder_acceptance_rate", "fallback_rate", "accepted_accuracy",
+                   "fallback_accuracy", "accepted_physics", "coverage", "selection_curve",
+                   "raw_all_requested_accuracy", "hybrid_all_requested_accuracy"):
         assert report[metric] == parallel[metric]
     assert parallel["timing"]["single_scenario_mean_seconds"] is None
     assert parallel["timing"]["evaluation_cases_per_second_including_physical_audits"] > 0
