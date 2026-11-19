@@ -98,6 +98,8 @@ def main(argv=None):
     evaluation.add_argument("--split", default="iid_test")
     evaluation.add_argument("--decoder")
     evaluation.add_argument("--workers", type=int, default=1, help="Independent scenario processes (default: 1)")
+    evaluation.add_argument("--prediction-format", choices=["jsonl", "jsonl.gz"], default="jsonl")
+    evaluation.add_argument("--decoder-norm-sensitivity", action="store_true")
     view = commands.add_parser("plot-solution", help="Export a solved grid graph as standalone interactive HTML")
     view.add_argument("output", type=Path)
     view.add_argument("--benchmark", choices=BENCHMARKS, default="case30")
@@ -169,7 +171,9 @@ def main(argv=None):
     if args.command == "evaluate":
         from .experiments import evaluate_model
         report = evaluate_model(args.dataset, args.model, args.output, split=args.split,
-                                decoder_path=args.decoder, workers=args.workers)
+                                 decoder_path=args.decoder, workers=args.workers,
+                                 prediction_format=args.prediction_format,
+                                 decoder_norm_sensitivity=args.decoder_norm_sensitivity)
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "plot-solution":

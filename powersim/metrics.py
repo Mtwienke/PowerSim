@@ -5,6 +5,7 @@ import numpy as np
 ACCURACY_DEFINITIONS = {
     "generator_accuracy_lt_1mw": "Individual finite source errors < 1 MW / all requested source outputs.",
     "joint_accuracy_lt_1mw": "Complete scenarios with every source error < 1 MW / requested scenarios.",
+    "scenario_mae_accuracy_lt_1mw": "Complete scenarios with mean absolute source error < 1 MW / requested scenarios; diagnostic vector reduction.",
     "success_rate_1mw": "Legacy joint-scenario criterion: every source error <= 1 MW.",
     "mae_mw": "Mean over complete finite prediction/reference rows; unavailable rows are not zero errors.",
     "paper_comparison": "Generator-wise aggregation is inferred from Gao et al. Table V; Eq. (26) leaves vector reduction unspecified.",
@@ -39,6 +40,7 @@ def accuracy(prediction, reference, *, denominator=None):
     scalar_hits = int(strict.sum())
     joint_hits = int((complete & strict.all(axis=1)).sum())
     legacy_hits = int((complete & inclusive.all(axis=1)).sum())
+    mae_hits = int((complete & (np.where(finite_outputs, np.abs(error), np.inf).mean(axis=1) < 1)).sum()) if ng else 0
     scalar_count = int(count*ng)
     return {
         "mae_mw": float(np.abs(finite).mean()) if finite.size else None,
@@ -51,6 +53,8 @@ def accuracy(prediction, reference, *, denominator=None):
         "sources_per_scenario": ng,
         "generator_accuracy_lt_1mw": scalar_hits/scalar_count if scalar_count else None,
         "joint_accuracy_lt_1mw": joint_hits/count if count else None,
+        "scenario_mae_accuracy_lt_1mw": mae_hits/count if count else None,
+        "scenario_mae_accuracy_count": mae_hits,
         "generator_accuracy_count": scalar_hits,
         "joint_accuracy_count": joint_hits,
         "generator_accuracy_denominator": scalar_count,

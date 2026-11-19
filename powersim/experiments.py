@@ -1,5 +1,6 @@
 """Measured single-case latency, batch throughput and independent physical metrics."""
 from dataclasses import asdict
+import gzip
 import json
 from pathlib import Path
 import time
@@ -12,7 +13,7 @@ from .contracts import DispatchDecision
 from .data import load_dataset, package_versions, write_json
 from .hybrid import HybridPredictor
 from .metrics import ACCURACY_DEFINITIONS, accuracy, selection_curve
-from .ml import artifact_hash, load_decoder, load_model, reconstruction_errors, tensor
+from .ml import artifact_hash, calibrate_threshold, load_decoder, load_model, reconstruction_errors, tensor
 from .network import NodalLoadWriter, build_dispatch_inputs, digest, make_case
 from .solver import evaluate_decision, solve_reference
 from .workers import ordered_pool, validate_workers
@@ -24,6 +25,8 @@ def _physical_summary(evaluations, reference_objectives):
     balances = [abs(e.raw_balance_residual_mw) for e in evaluations if e.raw_balance_residual_mw is not None]
     violated_branches = [b for e in evaluations for b in e.branches if b.violated]
     branch_excesses = [abs(b.p_from_mw)-b.limit_mw for b in violated_branches if b.limit_mw is not None]
+    source_events = [b for e in evaluations for b in e.branches
+                     if b.limit_mw is not None and abs(b.p_from_mw) > b.limit_mw+1.]
     return {
         "pf_failures": sum(e.status != "ok" for e in evaluations),
         "feasible_predictions": len(feasible),
@@ -38,6 +41,10 @@ def _physical_summary(evaluations, reference_objectives):
         "mean_branch_violation_mw": float(np.mean(branch_excesses)) if branch_excesses else None,
         "maximum_generator_bound_violation_mw": max((e.metrics.get("maximum_generator_bound_violation_mw", 0) for e in evaluations), default=0),
         "maximum_branch_violation_mw": max((e.metrics.get("maximum_branch_violation_mw", 0) for e in evaluations), default=0),
+        "source_like_branch_events_beyond_limit_plus_1mw": len(source_events),
+        "source_like_mean_excess_beyond_limit_plus_1mw": (
+            float(np.mean([abs(b.p_from_mw)-b.limit_mw-1 for b in source_events])) if source_events else None),
+        "source_like_branch_metric_note": "Branch-scenario events after PF slack rebalance above configured RATE_A + 1 MW; not strict raw feasibility.",
         "voltage_violations": None, "reactive_violations": None,
         "objective_gap_mean_percent_feasible_only": float(np.mean(gaps)) if gaps else None,
         "objective_gap_maximum_percent_feasible_only": float(np.max(gaps)) if gaps else None,
@@ -96,8 +103,11 @@ def _evaluate_case(loads):
     return raw, selected, elapsed, raw_seconds, record, raw_evaluation, chosen_evaluation
 
 
-def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_path=None, workers=1):
+def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_path=None, workers=1,
+                   prediction_format="jsonl", decoder_norm_sensitivity=False):
     validate_workers(workers)
+    if prediction_format not in ("jsonl", "jsonl.gz"):
+        raise ValueError("prediction_format must be jsonl or jsonl.gz")
     manifest, a = load_dataset(dataset)
     if split not in manifest["splits"] or split in ("train", "validation"):
         raise ValueError("Evaluation requires a held-out IID/OOD test split")
@@ -112,6 +122,8 @@ def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_pat
     decoder_metadata = None
     if decoder_path:
         _, decoder_metadata = load_decoder(decoder_path, model_path, model)
+        if decoder_norm_sensitivity and ("validation_x" not in a or not len(a["validation_x"])):
+            raise ValueError("Decoder norm diagnostics require source validation inputs")
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     torch.set_num_threads(1)
@@ -133,8 +145,10 @@ def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_pat
     raw_evaluations, hybrid_evaluations, reconstruction_scores = [], [], []
     eval_started = time.perf_counter()
     initargs = config, model_path, decoder_path, ids, x[0], manifest["model_id"]
-    with ordered_pool(workers, _init_evaluation_worker, initargs) as map_cases, \
-            (output / "predictions.jsonl").open("w") as out:
+    prediction_path = output / f"predictions.{prediction_format}"
+    prediction_stream = (gzip.open(prediction_path, "wt", encoding="utf-8", compresslevel=3)
+                         if prediction_format == "jsonl.gz" else prediction_path.open("w"))
+    with prediction_stream as out, ordered_pool(workers, _init_evaluation_worker, initargs) as map_cases:
         for sid, case in zip(a[f"{split}_scenario_ids"], map_cases(_evaluate_case, x)):
             prediction, chosen, elapsed, raw_seconds, record, audit, chosen_audit = case
             raw.append(prediction); hybrid.append(chosen)
@@ -194,6 +208,7 @@ def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_pat
             "note": "Decision timing includes normalization, decoder and fallback OPF when used, with a prepared network; excludes PF audit and queue time. Concurrent worker durations are not isolated latency; wall throughput includes startup, scheduling, PF and JSONL.",
         },
         "model_hash": artifact_hash(model_path), "versions": package_versions(),
+        "prediction_file": prediction_path.name,
         "warning": "Decoder acceptance is empirical selection, not a feasibility or optimality certificate.",
     }
     if decoder_metadata is not None:
@@ -208,6 +223,23 @@ def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_pat
             row["accepted_physics"] = _physical_summary(
                 [e for e, keep in zip(raw_evaluations, mask) if keep], objectives[mask])
         report["selection_curve_note"] = "Descriptive held-out results at validation-derived/explicit thresholds; no test threshold is selected."
+        if decoder_norm_sensitivity:
+            decoder, _ = load_decoder(decoder_path, model_path, model)
+            diagnostics = {}
+            for units in ("mae_mw", "rmse_mw", "l1_mw", "linf_mw"):
+                with torch.no_grad():
+                    scores = reconstruction_errors(model, decoder, tensor(x), units).numpy()
+                    validation_scores = reconstruction_errors(
+                        model, decoder, tensor(a["validation_x"]), units).numpy()
+                q95 = calibrate_threshold(validation_scores, .95)
+                diagnostics[units] = {
+                    "thresholds": {"fixed_6mw": 6., "fixed_7mw": 7., "validation_q95": q95},
+                    "selection_curve": selection_curve(scores, raw, y, [6., 7., q95]),
+                }
+            report["decoder_norm_sensitivity"] = {
+                "note": "Predeclared frozen-decoder score hypotheses. No test-selected norm, refitting, fallback timing or feasibility guarantee.",
+                "scores": diagnostics,
+            }
     write_json(output / "evaluation.json", report)
     np.savez_compressed(output / "predictions.npz", raw_generation_mw=raw, hybrid_generation_mw=hybrid,
                          batch_generation_mw=batch_prediction, accepted=accepted,
