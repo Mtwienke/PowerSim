@@ -240,7 +240,7 @@ def test_weakly_active_kkt_is_unavailable():
 def test_dataset_reproducibility_splits_and_normalization(tmp_path):
     c = DatasetConfig(train_cases=6, validation_cases=2, test_cases=2)
     m = generate_dataset(tmp_path / "a", c)
-    generate_dataset(tmp_path / "b", c)
+    generate_dataset(tmp_path / "b", c, workers=2)
     _, a = load_dataset(tmp_path / "a"); _, b = load_dataset(tmp_path / "b")
     for key in a:
         np.testing.assert_array_equal(a[key], b[key])
@@ -253,6 +253,13 @@ def test_dataset_reproducibility_splits_and_normalization(tmp_path):
     assert m["installations"]
     assert m["versions"]["pandapower"]
     assert m["splits"]["train"]["valid"] > 0
+    for split in m["splits"]:
+        def records(root):
+            values = [json.loads(line) for line in (tmp_path/root/f"{split}.jsonl").read_text().splitlines()]
+            for entry in values:
+                entry["reference"].pop("solver_seconds")
+            return values
+        assert records("a") == records("b")
 
 
 def test_congested_kkt_branch_identity_and_finite_difference(tmp_path):

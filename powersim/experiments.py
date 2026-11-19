@@ -11,9 +11,10 @@ from .config import SimulationConfig
 from .contracts import DispatchDecision
 from .data import load_dataset, package_versions, write_json
 from .hybrid import HybridPredictor
-from .ml import artifact_hash, load_decoder, load_model, tensor
-from .network import apply_nodal_loads, digest, make_case
+from .ml import artifact_hash, load_decoder, load_model, reconstruction_errors, tensor
+from .network import NodalLoadWriter, build_dispatch_inputs, digest, make_case
 from .solver import evaluate_decision, solve_reference
+from .workers import ordered_pool, validate_workers
 
 
 def accuracy(prediction, reference, *, denominator=None):
@@ -53,7 +54,59 @@ def _physical_summary(evaluations, reference_objectives):
     }
 
 
-def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_path=None):
+def _init_evaluation_worker(config, model_path, decoder_path, ids, warmup, model_id):
+    global _evaluation_worker
+    torch.set_num_threads(1)
+    model, _ = load_model(model_path)
+    predictor, fallback = None, None
+    audit = NodalLoadWriter(make_case(config))
+    if build_dispatch_inputs(audit.net, config)["context"].network_fingerprint != model_id:
+        raise ValueError("Current benchmark does not match dataset network")
+    with torch.no_grad():
+        model(tensor(warmup[None]))
+        if decoder_path:
+            decoder, meta = load_decoder(decoder_path, model_path, model)
+            predictor = HybridPredictor(model, decoder, meta, ids)
+            reconstruction_errors(model, decoder, tensor(warmup[None]), meta["error_units"])
+            fallback = NodalLoadWriter(make_case(config))
+    _evaluation_worker = config, model, predictor, audit, fallback, ids
+
+
+def _evaluate_case(loads):
+    config, model, predictor, audit, fallback, ids = _evaluation_worker
+
+    def reference():
+        fallback.apply(loads)
+        return solve_reference(fallback.net, config)
+
+    if predictor:
+        result = predictor.predict(loads, reference)  # never log held-out samples
+        prediction = result.raw_prediction_mw
+        chosen = result.generation_mw
+        record = asdict(result)
+        elapsed, raw_seconds = result.elapsed_seconds, result.raw_inference_seconds
+    else:
+        started = time.perf_counter()
+        with torch.no_grad():
+            prediction = tuple(float(p) for p in model(tensor(loads[None]))[0].numpy())
+        elapsed = raw_seconds = time.perf_counter()-started
+        chosen = prediction
+        record = {"status": "learned", "accepted": True, "fallback_seconds": 0}
+
+    def audit_output(power):
+        audit.apply(loads)
+        return evaluate_decision(audit.net, DispatchDecision(active_power_mw=dict(zip(ids, power))), config)
+
+    unavailable = (float("nan"),) * len(ids)
+    raw = prediction if prediction is not None else unavailable
+    selected = chosen if chosen is not None else unavailable
+    raw_evaluation = audit_output(raw)
+    chosen_evaluation = raw_evaluation if selected == raw else audit_output(selected)
+    return raw, selected, elapsed, raw_seconds, record, raw_evaluation, chosen_evaluation
+
+
+def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_path=None, workers=1):
+    validate_workers(workers)
     manifest, a = load_dataset(dataset)
     if split not in manifest["splits"] or split in ("train", "validation"):
         raise ValueError("Evaluation requires a held-out IID/OOD test split")
@@ -76,55 +129,30 @@ def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_pat
     if not len(x):
         raise ValueError("No valid reference cases in requested split")
     objectives = a[f"{split}_objective"]
-    predictor = None
-    if decoder_path:
-        decoder, meta = load_decoder(decoder_path, model_path, model)
-        predictor = HybridPredictor(model, decoder, meta, ids)
-    # Warm-up is explicit, excluded from measured inference latency/throughput.
+    # Model-only batched benchmark is measured separately, without worker contention.
     with torch.no_grad():
         model(tensor(x[:1]))
-        if predictor:
-            from .ml import reconstruction_errors
-            reconstruction_errors(model, decoder, tensor(x[:1]), meta["error_units"])
         started = time.perf_counter()
         batch_prediction = model(tensor(x)).numpy()
         batch_seconds = time.perf_counter()-started
-    raw, hybrid, accepted, runtimes, fallback_times, statuses = [], [], [], [], [], []
-    raw_evaluations, hybrid_evaluations, records = [], [], []
+    raw, hybrid, accepted, runtimes, raw_times, fallback_times, statuses = [], [], [], [], [], [], []
+    raw_evaluations, hybrid_evaluations = [], []
     eval_started = time.perf_counter()
-    for i, loads in enumerate(x):
-        def fallback():
-            net = make_case(config)
-            apply_nodal_loads(net, loads)
-            return solve_reference(net, config)
-        if predictor:
-            result = predictor.predict(loads, fallback)  # NEVER log held-out production samples
-            prediction = np.asarray(result.raw_prediction_mw) if result.raw_prediction_mw is not None else np.full(len(ids), np.nan)
-            chosen = np.asarray(result.generation_mw) if result.generation_mw is not None else np.full(len(ids), np.nan)
-            accepted.append(result.accepted); runtimes.append(result.elapsed_seconds)
-            fallback_times.append(result.fallback_seconds); statuses.append(result.status)
-            record = asdict(result)
-        else:
-            started = time.perf_counter()
-            with torch.no_grad():
-                prediction = model(tensor(loads[None]))[0].numpy()
-            runtimes.append(time.perf_counter()-started)
-            chosen = prediction
-            accepted.append(True); fallback_times.append(0); statuses.append("learned")
-            record = {}
-        raw.append(prediction); hybrid.append(chosen)
-        # Physical audit time is separate from decision latency and is measured.
-        net = make_case(config); apply_nodal_loads(net, loads)
-        e = evaluate_decision(net, DispatchDecision(active_power_mw=dict(zip(ids, map(float, prediction)))), config)
-        raw_evaluations.append(e)
-        if np.array_equal(prediction, chosen):
-            he = e
-        else:
-            net = make_case(config); apply_nodal_loads(net, loads)
-            he = evaluate_decision(net, DispatchDecision(active_power_mw=dict(zip(ids, map(float, chosen)))), config)
-        hybrid_evaluations.append(he)
-        records.append({"scenario_id": str(a[f"{split}_scenario_ids"][i]), **record,
-                        "raw_evaluation": e.to_dict(), "hybrid_evaluation": he.to_dict()})
+    initargs = config, model_path, decoder_path, ids, x[0], manifest["model_id"]
+    with ordered_pool(workers, _init_evaluation_worker, initargs) as map_cases, \
+            (output / "predictions.jsonl").open("w") as out:
+        for sid, case in zip(a[f"{split}_scenario_ids"], map_cases(_evaluate_case, x)):
+            prediction, chosen, elapsed, raw_seconds, record, audit, chosen_audit = case
+            raw.append(prediction); hybrid.append(chosen)
+            accepted.append(record["accepted"]); statuses.append(record["status"])
+            runtimes.append(elapsed); fallback_times.append(record["fallback_seconds"])
+            if raw_seconds is not None:
+                raw_times.append(raw_seconds)
+            raw_evaluations.append(audit); hybrid_evaluations.append(chosen_audit)
+            detail = {"scenario_id": str(sid), **record, "raw_evaluation": audit.to_dict(),
+                      "hybrid_evaluation": chosen_audit.to_dict()}
+            out.write(json.dumps(detail, allow_nan=False) + "\n")
+    elapsed = time.perf_counter()-eval_started
     raw, hybrid, accepted = np.asarray(raw), np.asarray(hybrid), np.asarray(accepted)
     total_requested = manifest["splits"][split]["requested"]
     report = {
@@ -136,36 +164,28 @@ def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_pat
         "accepted_accuracy": accuracy(raw[accepted], y[accepted]),
         "raw_physics": _physical_summary(raw_evaluations, objectives),
         "hybrid_physics": _physical_summary(hybrid_evaluations, objectives),
-        "decoder_acceptance_rate": float(accepted.mean()) if predictor else None,
-        "fallback_rate": float((~accepted).mean()) if predictor else 0.0,
+        "decoder_acceptance_rate": float(accepted.mean()) if decoder_path else None,
+        "fallback_rate": float((~accepted).mean()) if decoder_path else 0.0,
         "fallback_failures": statuses.count("failed"),
         "timing": {
-            "device": "CPU", "warmup_cases": 1, "single_scenario_samples": len(x),
-            "single_scenario_mean_seconds": float(np.mean(runtimes)),
-            "single_scenario_p95_seconds": float(np.quantile(runtimes, .95)),
+            "device": "CPU", "workers": workers, "warmup_cases_per_worker": 1,
+            "single_scenario_samples": len(x) if workers == 1 else None,
+            "single_scenario_mean_seconds": float(np.mean(runtimes)) if workers == 1 else None,
+            "single_scenario_p95_seconds": float(np.quantile(runtimes, .95)) if workers == 1 else None,
+            "in_worker_mean_decision_seconds": float(np.mean(runtimes)),
+            "in_worker_mean_raw_inference_seconds": float(np.mean(raw_times)) if raw_times else None,
             "decision_seconds_total_including_decoder_and_fallback": float(sum(runtimes)),
             "fallback_seconds_total": float(sum(fallback_times)),
             "opf_model_only_batch_seconds": batch_seconds,
             "opf_model_only_batch_cases_per_second": len(x)/batch_seconds,
-            "evaluation_loop_seconds_including_physical_audits": time.perf_counter()-eval_started,
-            "note": "Decision latency includes normalization, decoder and fallback construction/OPF when used; excludes independent PF audit. Batch throughput excludes decoder/fallback.",
+            "evaluation_loop_seconds_including_physical_audits": elapsed,
+            "evaluation_cases_per_second_including_physical_audits": len(x)/elapsed,
+            "note": "Decision timing includes normalization, decoder and fallback OPF when used, with a prepared network; excludes PF audit and queue time. Concurrent worker durations are not isolated latency; wall throughput includes startup, scheduling, PF and JSONL.",
         },
         "model_hash": artifact_hash(model_path), "versions": package_versions(),
         "warning": "Decoder acceptance is empirical selection, not a feasibility or optimality certificate.",
     }
     write_json(output / "evaluation.json", report)
-    # Preserve failed outputs as JSON nulls, not non-standard NaN literals.
-    def clean(value):
-        if isinstance(value, dict):
-            return {k: clean(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [clean(v) for v in value]
-        if isinstance(value, float) and not np.isfinite(value):
-            return None
-        return value
-    with (output / "predictions.jsonl").open("w") as f:
-        for record in records:
-            f.write(json.dumps(clean(record), allow_nan=False) + "\n")
     np.savez_compressed(output / "predictions.npz", raw_generation_mw=raw, hybrid_generation_mw=hybrid,
                         batch_generation_mw=batch_prediction, accepted=accepted)
     return report

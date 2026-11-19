@@ -1,8 +1,9 @@
 """Headless research commands. ML imports are intentionally lazy."""
 import argparse
 import json
+from pathlib import Path
 
-from .config import SimulationConfig
+from .config import BENCHMARKS, SimulationConfig
 from .data import DatasetConfig, generate_dataset
 from .network import make_case
 from .solver import solve_reference
@@ -13,13 +14,15 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     solve = commands.add_parser("reference", help="Solve and validate numerical OPF")
     solve.add_argument("--physics", choices=["dc", "ac"], default="dc")
-    solve.add_argument("--benchmark", choices=["case30", "case14"], default="case30")
+    solve.add_argument("--benchmark", choices=BENCHMARKS, default="case30")
+    solve.add_argument("--branch-limit-scale", type=float, default=1.)
     data = commands.add_parser("dataset", help="Generate seeded DC-OPF labels")
     data.add_argument("directory")
     data.add_argument("--preset", choices=["smoke", "paper"], default="smoke")
     data.add_argument("--seed", type=int, default=2026)
-    data.add_argument("--benchmark", choices=["case30", "case14"], default="case30")
+    data.add_argument("--benchmark", choices=BENCHMARKS, default="case30")
     data.add_argument("--branch-limit-scale", type=float, default=.9)
+    data.add_argument("--workers", type=int, default=1, help="Independent OPF processes (default: 1)")
     data.add_argument("--config", help="JSON DatasetConfig overrides, including renewable conversion parameters")
     train = commands.add_parser("train", help="Train baseline or configurable physics-guided DC network")
     train.add_argument("dataset")
@@ -55,6 +58,15 @@ def main(argv=None):
     evaluation.add_argument("output")
     evaluation.add_argument("--split", default="iid_test")
     evaluation.add_argument("--decoder")
+    evaluation.add_argument("--workers", type=int, default=1, help="Independent scenario processes (default: 1)")
+    view = commands.add_parser("plot-solution", help="Export a solved grid graph as standalone interactive HTML")
+    view.add_argument("output", type=Path)
+    view.add_argument("--benchmark", choices=BENCHMARKS, default="case30")
+    view.add_argument("--physics", choices=["dc", "ac"], default="dc")
+    view.add_argument("--branch-limit-scale", type=float, default=1.)
+    view.add_argument("--dataset", type=Path, help="Replay the saved reference instead of solving a new case")
+    view.add_argument("--split", default="iid_test")
+    view.add_argument("--sample", type=int, default=0, help="Original zero-based attempt number (not filtered row)")
     infer = commands.add_parser("infer", help="Online DC hybrid prediction; rejected cases logged separately")
     infer.add_argument("dataset", help="Source manifest/configuration (not held-out inputs)")
     infer.add_argument("model")
@@ -63,7 +75,7 @@ def main(argv=None):
     infer.add_argument("--production-log", required=True)
     args = parser.parse_args(argv)
     if args.command == "reference":
-        config = SimulationConfig(args.physics, args.benchmark)
+        config = SimulationConfig(args.physics, args.benchmark, branch_limit_scale=args.branch_limit_scale)
         result = solve_reference(make_case(config), config)
         print(json.dumps(result.to_dict(), indent=2, allow_nan=False))
         return 0 if result.status == "ok" else 1
@@ -71,7 +83,6 @@ def main(argv=None):
         values = {"seed": args.seed, "simulation": SimulationConfig(benchmark=args.benchmark,
                                                                    branch_limit_scale=args.branch_limit_scale)}
         if args.config:
-            from pathlib import Path
             from .data import RenewableConfig
             overrides = json.loads(Path(args.config).read_text())
             if "simulation" in overrides:
@@ -79,11 +90,10 @@ def main(argv=None):
             if "renewable" in overrides:
                 overrides["renewable"] = RenewableConfig(**overrides["renewable"])
             values.update(overrides)
-        manifest = generate_dataset(args.directory, DatasetConfig.preset(args.preset, **values))
+        manifest = generate_dataset(args.directory, DatasetConfig.preset(args.preset, **values), workers=args.workers)
         print(json.dumps(manifest["splits"], indent=2))
         return 0
     if args.command == "train":
-        from pathlib import Path
         from .ml import TrainConfig, train_model
         weights = {"L0": 1.0} if args.method == "baseline" else {f"L{i}": 1.0 for i in range(6)}
         if args.loss_weights:
@@ -104,9 +114,27 @@ def main(argv=None):
         return 0
     if args.command == "evaluate":
         from .experiments import evaluate_model
-        report = evaluate_model(args.dataset, args.model, args.output, split=args.split, decoder_path=args.decoder)
+        report = evaluate_model(args.dataset, args.model, args.output, split=args.split,
+                                decoder_path=args.decoder, workers=args.workers)
         print(json.dumps(report, indent=2))
         return 0
+    if args.command == "plot-solution":
+        from .solution_view import dataset_solution, solution_figure
+        if args.output.exists():
+            parser.error(f"Output already exists: {args.output}")
+        if args.dataset:
+            net, result, demand, renewables = dataset_solution(args.dataset, args.split, args.sample)
+            label = f"{net.name or 'Saved reference'} · {args.split}, attempt {args.sample}"
+        else:
+            config = SimulationConfig(args.physics, args.benchmark, branch_limit_scale=args.branch_limit_scale)
+            net = make_case(config)
+            result = solve_reference(net, config).to_dict()
+            demand = renewables = label = None
+        figure = solution_figure(net, result, demand=demand, renewables=renewables, label=label)
+        with args.output.open("x", encoding="utf-8") as output:
+            figure.write_html(output, include_plotlyjs=True)
+        print(f"{result['status']}: {args.output}")
+        return 0 if result["status"] == "ok" else 1
     if args.command == "calibrate":
         from .ml import recalibrate_decoder
         report = recalibrate_decoder(args.dataset, args.model, args.decoder, args.output,
@@ -115,7 +143,6 @@ def main(argv=None):
         return 0
     if args.command == "infer":
         from dataclasses import asdict
-        from pathlib import Path
         from .data import load_dataset
         from .hybrid import HybridPredictor
         from .ml import load_decoder, load_model

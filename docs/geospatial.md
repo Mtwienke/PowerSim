@@ -1,5 +1,11 @@
 # Geographic layer
 
+For an electrical graph of a solved scenario, see the dashboard's **Solution
+Flow** view or `powersim plot-solution`. IEEE layouts are schematics; the
+[Germany-30](germany30.md) layout uses approximate regional centroids. This
+view works offline and is separate from the illustrative geographic mapping
+below.
+
 The geographic layer is an optional visualization adapter and does not affect network construction, dispatch, or power flow. Mappings use GeoJSON coordinates in EPSG:4326 and stable `asset_type` + `asset_id` properties. `metadata` must state schema version, geometry kind, provenance, and license. Use `electrical_index` only to bind an electrical result to a stable mapped asset; it is an explicit mapping, never inferred from proximity.
 
 The included `examples/geography/synthetic_feeder.geojson` is a synthetic geography-based demonstration mapping. Its lines and locations are illustrative, not actual utility geometry. IEEE case14 electrical results are not overlaid on this demo map; result values render only when a mapping explicitly identifies the matching bus or line indices. Missing or failed result values render gray/unknown. The map currently supports bus voltage magnitude/deviation and line loading; transformers, load/generator metric overlays, time sliders, and before/after controller comparison need a result time-series plus explicit asset bindings and remain future work. Area polygons are intentionally unsupported; the view does not imply service areas or outage risk.

@@ -6,7 +6,9 @@ Generalization Ability*, DOI
 [10.1109/TNNLS.2024.3437741](https://doi.org/10.1109/TNNLS.2024.3437741).
 
 **Defaults: IEEE 30 · DC physics · numerical DC-OPF.** IEEE 14 and AC remain
-selectable. PF evaluates prescribed decisions; OPF generates references.
+selectable. The [Germany-30 benchmark](docs/germany30.md) is a DC-only reduced
+transmission model based on open PyPSA-Eur data. PF evaluates prescribed
+decisions; OPF generates references.
 Learned predictions are never silently optimized.
 
 ## Install
@@ -86,6 +88,30 @@ Rejection logging never updates a model. Retraining requires an explicit new
 dataset and `train` invocation. Decoder acceptance is **not** a proof of
 feasibility or optimality.
 
+## Use multiple cores or inspect one solution
+
+```sh
+powersim dataset artifacts/germany-data --benchmark germany30 --workers 4
+powersim evaluate DATASET MODEL.pt artifacts/parallel-eval --workers 4 --decoder DECODER.pt
+powersim plot-solution artifacts/germany-solution.html --benchmark germany30
+```
+
+`dataset` and `evaluate` default to one worker. `--workers 4` uses independent
+processes, with deterministic scenario ordering. A decoder evaluation already
+reports raw-model **and** hybrid results, so it need not be preceded by a second
+raw evaluation unless a separate model-only latency comparison is wanted.
+Worker throughput includes audits, startup and scheduling; it is not
+single-scenario latency. See [runtime measurements](docs/performance.md).
+
+The dashboard's **Solution Flow** graph shows bus injections and demand, the
+slack, flow arrows, branch loading, and transformers. Learned and fallback
+views are distinct. `plot-solution` makes an offline interactive HTML report
+or replays a saved dataset reference without re-solving it:
+
+```sh
+powersim plot-solution artifacts/sample.html --dataset artifacts/germany-data --split train --sample 0
+```
+
 ## Protocol, configuration and limitations
 
 See [docs/research.md](docs/research.md) for loss equations, normalization,
@@ -98,9 +124,9 @@ manifests report actual active sets and label failures rather than assuming
 congestion. No repair/projection or automatic retraining is implemented.
 
 Custom heuristics remain in `controllers/my_dispatch.py`, receiving frozen DTOs,
-never a mutable pandapower network. Only the bundled balanced quasi-static
-networks and polynomial conventional-source costs are supported by the research
-adapter; it is not a production grid operating tool.
+never a mutable pandapower network. The supported benchmarks are bundled
+balanced quasi-static models with polynomial conventional-source costs; the
+research adapter is not a production grid operating tool.
 
 ## Geographic view
 

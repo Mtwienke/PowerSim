@@ -123,6 +123,16 @@ def test_short_cpu_training_decoder_and_evaluation(dataset, tmp_path):
     assert report["timing"]["single_scenario_mean_seconds"] > 0
     assert report["raw_physics"]["voltage_violations"] is None
     assert (tmp_path/"evaluation"/"predictions.jsonl").exists()
+    parallel = evaluate_model(dataset, model_path, tmp_path/"parallel", workers=2,
+                              decoder_path=tmp_path/"decoder"/"decoder.pt")
+    for metric in ("raw_accuracy", "hybrid_accuracy", "raw_physics", "hybrid_physics",
+                   "decoder_acceptance_rate", "fallback_rate"):
+        assert report[metric] == parallel[metric]
+    assert parallel["timing"]["single_scenario_mean_seconds"] is None
+    assert parallel["timing"]["evaluation_cases_per_second_including_physical_audits"] > 0
+    serial_ids = [json.loads(row)["scenario_id"] for row in (tmp_path/"evaluation"/"predictions.jsonl").read_text().splitlines()]
+    parallel_ids = [json.loads(row)["scenario_id"] for row in (tmp_path/"parallel"/"predictions.jsonl").read_text().splitlines()]
+    assert serial_ids == parallel_ids
     with pytest.raises(ValueError, match="held-out"):
         evaluate_model(dataset, model_path, tmp_path/"invalid", split="validation")
     from streamlit.testing.v1 import AppTest
@@ -139,7 +149,7 @@ def test_short_cpu_training_decoder_and_evaluation(dataset, tmp_path):
     assert result["status"] in ("learned", "fallback")
     assert result["raw_evaluation"]["operation"] == "pf"
     assert result["bus_voltage_pu"] is None
-    app.sidebar.selectbox[0].select("ac").run()
+    app.sidebar.selectbox(key="physics").select("ac").run()
     assert "learned" not in app.sidebar.selectbox[2].options
 
 

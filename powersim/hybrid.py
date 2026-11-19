@@ -21,6 +21,7 @@ class HybridResult:
     elapsed_seconds: float
     fallback_seconds: float
     diagnostics: tuple[str, ...] = ()
+    raw_inference_seconds: float | None = None
 
 
 class HybridPredictor:
@@ -46,11 +47,13 @@ class HybridPredictor:
         with torch.no_grad():
             tx = tensor(x[None])
             prediction = self.model(tx)[0].numpy()
+            raw_seconds = time.perf_counter()-started
             error = float(reconstruction_errors(self.model, self.decoder, tx, self.metadata["error_units"])[0])
         finite = bool(np.isfinite(prediction).all() and np.isfinite(error))
         raw = tuple(float(p) for p in prediction) if np.isfinite(prediction).all() else None
         if finite and error <= self.metadata["threshold"]:
-            return HybridResult("learned", True, raw, raw, error, time.perf_counter()-started, 0)
+            return HybridResult("learned", True, raw, raw, error, time.perf_counter()-started, 0,
+                                raw_inference_seconds=raw_seconds)
         fallback_started = time.perf_counter()
         try:
             result = fallback()
@@ -76,4 +79,4 @@ class HybridPredictor:
                                       "threshold": self.metadata["threshold"], "fallback_status": status,
                                       "diagnostics": diagnostics}, allow_nan=False) + "\n")
         return HybridResult(status, False, raw, generation, error if np.isfinite(error) else None,
-                            time.perf_counter()-started, fallback_seconds, tuple(diagnostics))
+                            time.perf_counter()-started, fallback_seconds, tuple(diagnostics), raw_seconds)

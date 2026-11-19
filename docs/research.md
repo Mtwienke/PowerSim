@@ -17,6 +17,7 @@ compatibility. Other versions are recorded per artifact.
 
 Default IEEE 30 DC numerical reference uses `rundcopp`. IEEE 14 is selectable.
 AC reference uses `runopp`. Independent evaluation uses only `rundcpp`/`runpp`.
+The [Germany-30](germany30.md) regional equivalent is a separate DC-only benchmark.
 No learned/heuristic prediction is replaced with OPF before reporting its errors.
 DTOs are frozen and have stable bus/source IDs. Source order is ascending
 external grids, then ascending generators; **all include slack**. Bus order is
@@ -176,12 +177,14 @@ feasible predictions**, with coverage count. If none are feasible, gap is null,
 not zero. No AC voltage or Q error is inferred from a DC model.
 
 Single-scenario CPU decision latency includes normalization, decoder computation,
-and fallback network construction/OPF when invoked. Production logging overhead
+and fallback OPF on a prepared worker network when invoked. Production logging overhead
 is also included when logging is requested. Model loading and one explicit
 warm-up are excluded. Independent PF audit time is excluded from decision latency
 but included in separately measured evaluation-loop wall time. Batch throughput
 is separately measured for the **OPF neural network only**, not mislabeled as
 hybrid latency. All runtimes are measured wall clock, not derived from FLOPs.
+For [parallel evaluations](performance.md), concurrently measured worker
+durations are exposed separately, without claiming isolated latency.
 Calls request `numba=False`. Pandapower 3.5.6's `rundcpp` ignores that keyword
 and auto-detects Numba; the validated environment has no Numba and uses the
 no-JIT CPU path. Its repeated missing-Numba warnings are upstream behavior.

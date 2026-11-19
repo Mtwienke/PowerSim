@@ -102,8 +102,7 @@ def _branches(net, dc: bool) -> tuple[BranchResult, ...]:
     return tuple(output)
 
 
-def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
-    inputs = build_dispatch_inputs(net, config)
+def _collect(net, config, operation, elapsed, inputs, proposed=None) -> SolveResult:
     gens, ctx = inputs["generators"], inputs["context"]
     dc = config.physics_mode == "dc"
     realized, reactive = {}, {}
@@ -122,7 +121,8 @@ def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
     if len(branches) != expected_branches or len(net.res_bus) != len(net.bus):
         raise ValueError("Incomplete solver output coverage")
     target = realized if proposed is None else proposed
-    raw_balance = sum(target.values()) - sum(nodal_loads(net)) - float(net._ppc["bus"][:, GS].sum())
+    loads = nodal_loads(net)
+    raw_balance = sum(target.values()) - sum(loads) - float(net._ppc["bus"][:, GS].sum())
     # AC includes losses; raw balance is diagnostic, not a lossless AC feasibility condition.
     pviol = sum(p < g.p_min_mw-BOUND_TOL_MW or p > g.p_max_mw+BOUND_TOL_MW
                 for g in gens for p in (target[g.asset_id],))
@@ -166,7 +166,7 @@ def _collect(net, config, operation, elapsed, proposed=None) -> SolveResult:
         active_voltage_lower=None if dc else tuple(abs(vm[f"bus:{i}"]-float(net.bus.at[i, "min_vm_pu"])) <= VOLTAGE_TOL_PU for i in ordered_buses(net)),
         active_voltage_upper=None if dc else tuple(abs(vm[f"bus:{i}"]-float(net.bus.at[i, "max_vm_pu"])) <= VOLTAGE_TOL_PU for i in ordered_buses(net)),
         model_id=ctx.network_fingerprint, configuration_id=ctx.configuration_id,
-        input_id=digest({"p": nodal_loads(net), "q": net.load.q_mvar.tolist()}),
+        input_id=digest({"p": loads, "q": net.load.q_mvar.tolist()}),
         generator_ids=ctx.controllable_assets, bus_ids=ctx.bus_ids,
     )
 
@@ -175,11 +175,11 @@ def solve_reference(net, config: SimulationConfig | None = None) -> SolveResult:
     config = config or SimulationConfig()
     started = time.perf_counter()
     try:
-        build_dispatch_inputs(net, config)  # fail early on unsupported contracts
+        inputs = build_dispatch_inputs(net, config)  # fail early on unsupported contracts
         (pp.rundcopp if config.physics_mode == "dc" else pp.runopp)(net, numba=False)
         if not net.OPF_converged:
             raise ValueError("OPF did not converge")
-        result = _collect(net, config, "opf", time.perf_counter()-started)
+        result = _collect(net, config, "opf", time.perf_counter()-started, inputs)
         if not result.metrics["feasible"]:
             return SolveResult(**{**result.__dict__, "status": "invalid",
                                   "diagnostics": ("Converged OPF failed independent label validation",)})
@@ -219,7 +219,7 @@ def evaluate_decision(net, decision: DispatchDecision, config: SimulationConfig 
         (pp.rundcpp if config.physics_mode == "dc" else pp.runpp)(net, numba=False)
         if not net.converged:
             raise ValueError("Power flow did not converge")
-        return _collect(net, config, "pf", time.perf_counter()-started, proposed)
+        return _collect(net, config, "pf", time.perf_counter()-started, inputs, proposed)
     except Exception as exc:
         snapshot = dict(decision.active_power_mw)
         safe_snapshot = snapshot if all(isinstance(v, (int, float)) and math.isfinite(v) for v in snapshot.values()) else None

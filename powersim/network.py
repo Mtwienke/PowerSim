@@ -18,7 +18,11 @@ def digest(payload) -> str:
 
 def make_case(config: SimulationConfig | None = None) -> pp.pandapowerNet:
     config = config or SimulationConfig()
-    net = getattr(pn, config.benchmark)()
+    if config.benchmark == "germany30":
+        from .german_case import make_germany30
+        net = make_germany30()
+    else:
+        net = getattr(pn, config.benchmark)()
     for table in (net.line, net.trafo):
         if len(table):
             if "max_loading_percent" not in table:
@@ -75,13 +79,16 @@ def generators(net) -> tuple[Generator, ...]:
     return tuple(result)
 
 
-def nodal_loads(net) -> tuple[float, ...]:
+def nodal_power(net, element) -> tuple[float, ...]:
     values = dict.fromkeys(ordered_buses(net), 0.0)
-    for name, sign in (("load", 1), ("sgen", -1)):
-        for _, row in net[name].iterrows():
-            if row.in_service and int(row.bus) in values:
-                values[int(row.bus)] += sign * float(row.p_mw) * float(row.get("scaling", 1))
+    for row in net[element].itertuples():
+        if row.in_service and row.bus in values:
+            values[row.bus] += float(row.p_mw) * float(row.scaling)
     return tuple(values.values())
+
+
+def nodal_loads(net) -> tuple[float, ...]:
+    return tuple(load - injection for load, injection in zip(nodal_power(net, "load"), nodal_power(net, "sgen")))
 
 
 def apply_nodal_loads(net, values) -> None:
@@ -99,6 +106,27 @@ def apply_nodal_loads(net, values) -> None:
             net.load.at[indices[0], "p_mw"] = float(value) / float(net.load.at[indices[0], "scaling"])
         else:
             pp.create_load(net, bus, p_mw=float(value), q_mvar=0)
+
+
+class NodalLoadWriter:
+    """Prepare one private DC scratch network; subsequent cases update only P."""
+
+    def __init__(self, net):
+        self.net = net
+        apply_nodal_loads(net, nodal_loads(net))
+        first = net.load[net.load.in_service].reset_index().drop_duplicates("bus").set_index("bus")
+        rows = first.loc[list(ordered_buses(net))]
+        self.indices = rows["index"].to_list()
+        scaling = rows.scaling.to_numpy(dtype=float)
+        if not np.isfinite(scaling).all() or (scaling <= 0).any():
+            raise ValueError("Scenario load row scaling must be finite and positive")
+        self.scaling = scaling
+
+    def apply(self, values):
+        values = np.asarray(values, dtype=float)
+        if values.shape != self.scaling.shape or not np.isfinite(values).all():
+            raise ValueError("One finite net load required per ordered bus")
+        self.net.load.loc[self.indices, "p_mw"] = values / self.scaling
 
 
 def build_dispatch_inputs(net, config: SimulationConfig | None = None) -> dict:
