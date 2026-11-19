@@ -44,7 +44,7 @@ def main(argv=None):
     train = commands.add_parser("train", help="Train baseline or configurable physics-guided DC network")
     train.add_argument("dataset")
     train.add_argument("output")
-    train.add_argument("--method", choices=["baseline", "physics-guided", "M1", "M2", "M4", "M5"], default="baseline")
+    train.add_argument("--method", choices=["baseline", "physics-guided", "M1", "M2", "M3-example", "M4", "M5"], default="baseline")
     train.add_argument("--epochs", type=int, default=100)
     train.add_argument("--hidden", type=_hidden_widths, default=(200, 200, 200))
     train.add_argument("--batch-size", type=int, default=64)
@@ -64,16 +64,17 @@ def main(argv=None):
     decoder.add_argument("--hidden", type=_hidden_widths, default=(128,), help="One or more hidden widths, e.g. 128,128")
     decoder.add_argument("--learning-rate", type=float, default=.001)
     decoder.add_argument("--quantile", type=float, default=.95)
-    decoder.add_argument("--error-units", choices=["normalized", "mw2", "mae_mw", "rmse_mw"], default="normalized")
+    decoder.add_argument("--error-units", choices=["normalized", "mw2", "mae_mw", "rmse_mw", "l1_mw", "linf_mw"], default="normalized")
     decoder.add_argument("--threshold", type=float, help="Explicit fixed threshold in the chosen score units (not an accuracy guarantee)")
     decoder.add_argument("--seed", type=int, default=2026)
+    decoder.add_argument("--config", help="JSON decoder overrides, including activation, feature layer and optimizer numerics")
     calibration = commands.add_parser("calibrate", help="Recalibrate a decoder threshold on validation only")
     calibration.add_argument("dataset")
     calibration.add_argument("model")
     calibration.add_argument("decoder")
     calibration.add_argument("output")
     calibration.add_argument("--quantile", type=float, default=.95)
-    calibration.add_argument("--error-units", choices=["normalized", "mw2", "mae_mw", "rmse_mw"])
+    calibration.add_argument("--error-units", choices=["normalized", "mw2", "mae_mw", "rmse_mw", "l1_mw", "linf_mw"])
     calibration.add_argument("--threshold", type=float, help="Explicit fixed threshold instead of a validation quantile")
     pilot = commands.add_parser("pilot", help="Shared-M1, warm-started Gao training pilot on an existing DC dataset")
     pilot.add_argument("dataset")
@@ -146,10 +147,12 @@ def main(argv=None):
         return 0
     if args.command == "decoder":
         from .ml import train_decoder
-        report = train_decoder(args.dataset, args.model, args.output, epochs=args.epochs,
-                                batch_size=args.batch_size, hidden=args.hidden, quantile=args.quantile,
-                                units=args.error_units, seed=args.seed, threshold=args.threshold,
-                                learning_rate=args.learning_rate)
+        values = {"epochs": args.epochs, "batch_size": args.batch_size, "hidden": args.hidden,
+                  "quantile": args.quantile, "units": args.error_units, "seed": args.seed,
+                  "threshold": args.threshold, "learning_rate": args.learning_rate}
+        if args.config:
+            values.update(json.loads(Path(args.config).read_text()))
+        report = train_decoder(args.dataset, args.model, args.output, **values)
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "pilot":

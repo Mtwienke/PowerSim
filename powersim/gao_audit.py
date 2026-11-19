@@ -16,7 +16,7 @@ from .data import package_versions, write_json
 
 SOURCE_REVISION = "e775ce3a24af0408aed9c02236abd862707cbae0"
 POWER_BASE_MW = 100.0
-_DATA_ARRAYS = {"x_mean", "x_scale", "y_mean", "y_scale", "m_g", "m_d", "branch_constant"}
+_DATA_ARRAYS = {"x_mean", "x_scale", "y_mean", "y_scale", "m_g", "m_d", "branch_constant", "branch_limits_mw"}
 
 
 def _sha(path):
