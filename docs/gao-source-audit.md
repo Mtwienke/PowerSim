@@ -177,6 +177,69 @@ This establishes **unavailable through our anonymous access**, not a verified
 permanent deletion or proof that an authenticated user cannot access it.
 No access control was bypassed and no author was contacted automatically.
 
+## Measured read-only diagnostic: seed 2027
+
+Executed the diagnostic from **`9a3de55`** against the unchanged existing
+IEEE-30 dataset and the pilot's **final M1 and final M5**, without training.
+Artifact: `artifacts/gao-source-audit-20261119/preprocessing/audit.json`.
+
+### Sensitivity-label policy
+
+| Split | Supervised cases, unchanged | Example-kept Jacobians | Additionally masked Jacobians | Share of reference squared magnitude masked |
+|---|---:|---:|---:|---:|
+| Training | 9,425 | 8,901 | **524** | **98.5374%** |
+| Validation | 929 | 876 | **53** | **65.4717%** |
+
+All those sensitivities are available under our existing regular-KKT policy.
+The source's magnitude predicate is an additional learning mask, **not** evidence
+that the labels are invalid. The earlier finite-difference-validated extremes
+are among the masked rows. No labels, availability flags or supervised cases
+were changed. Validation rows are inspected diagnostically, not used for
+Jacobian-loss training.
+
+The 98.54% figure describes **reference-label magnitude**, not actual trained
+residuals. At final M1, applying the mask and full-tensor denominator to the
+same predicted training Jacobians changes the L1 snapshot from **19.4287 to
+9.0838**, not a 98.54% decrease: the model's own derivatives are also poorly
+controlled. Thus the filter is a major mismatch, **not an isolated causal
+explanation or demonstrated remedy**.
+
+### Units and reductions at unchanged saved weights
+
+Full-training-split snapshots, **not online/minibatch logged losses**:
+
+| Saved checkpoint | L0 MSE, MW² (pilot) | L0 MAE, per-unit (example convention) | L1 pilot / example reduction | Balance MSE / MAE |
+|---|---:|---:|---:|---:|
+| Final M1, epoch 1,000 | 0.610726 | 0.005231 | 19.4287 / 9.0838 | 154.3927 / 2.1727 |
+| Final M5, continuation epoch 200 | 13.325761 | 0.022534 | 28.7181 / 14.0453 | 383.0354 / 2.6832 |
+
+These are counterfactual numeric objectives on the **same tanh networks**,
+not a source-compatible retraining or evidence that source-trained ReLU
+networks would have these losses. In particular, changing supervised units
+alone does not guarantee a better balance of loss gradients.
+
+For a common 100 MW input/output base,
+`d(Y/100)/d(X/100) = dY/dX`: per-unit conversion leaves physical Jacobian values
+unchanged, while supervised MSE changes by **1/10,000** and MAE by **1/100**.
+The historical pilot's input-noise standard deviations range from
+**0.04805 to 0.54421 MW**. The example's `stddev=1.0` would be **100 MW** under
+its demonstrated interface. This large discrepancy is another reason not to
+call an unmodified example a verified final-paper protocol.
+
+### Integrity and limits
+
+- **101 tests passed**, including signed versus absolute maximum, strict
+  cutoff, nonzero-sum filtering, masking denominators, per-unit loss conversion,
+  no held-out-array access, read-only model checks, and Germany exclusion.
+- A fixed-positive ReLU test confirms zero input Hessian with **nonzero mixed
+  input/parameter gradients** for Jacobian learning. ReLU is not ruled out by
+  its zero Hessian; no trained ReLU result is claimed here.
+- The diagnostic verifies matching train/validation hashes and unchanged model
+  states/files. All **135 original pilot output hashes** were rechecked after
+  the audit and remain unchanged.
+- No new benchmark, decoder training, held-out metric selection or penetration
+  sensitivity experiment was run.
+
 ## Decisions before another run
 
 ### Reproducible read-only preprocessing diagnostic
