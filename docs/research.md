@@ -140,8 +140,9 @@ number of selected entries; empty masks contribute zero):
   not a claim of physically sampled weather. L3/L4 are never imposed there.
 
 L1–L5 have units (MW/MW)². Their weighting relative to L0 is configurable;
-equal weights are not scale invariant. ReLU is selectable but its second
-derivatives are zero almost everywhere; tanh is the smooth default. No test
+equal weights are not scale invariant. ReLU has zero input Hessians almost
+everywhere, but mixed input/parameter derivatives can still train Jacobian
+penalties; the smooth tanh default is an unverified activation assumption. No test
 labels enter training, early stopping, decoder training or calibration.
 
 ## Decoder and online decisions

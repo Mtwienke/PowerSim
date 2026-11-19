@@ -78,6 +78,9 @@ rate 0.01, records provenance, keeps best/final checkpoints and supports
 hash-checked `--resume`. It does not regenerate scenarios or evaluate held-out
 data. Add `--learning-rates 0.01,0.001` for a declared stability control.
 Generic training defaults and existing model/decoder files remain compatible.
+The completed [IEEE-30 pilot](docs/ieee30-pilot-seed2027.md) follows this schedule
+but **does not reproduce the paper's accuracy or method ranking**; its report
+separates fitting failure, data-definition uncertainties and decoder coverage.
 
 ## What is implemented
 
