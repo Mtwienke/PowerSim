@@ -29,7 +29,7 @@ SPLITS = ("iid_test", "ood_test_1", "ood_test_2")
 @dataclass(frozen=True)
 class SuiteConfig:
     seed: int = 2027
-    test_seed: int = 20281119
+    test_seed: int = 20281121
     workers: int = 8
     train_cases: int = 10000
     validation_cases: int = 1000
@@ -55,7 +55,7 @@ class SuiteConfig:
 
     @classmethod
     def smoke(cls):
-        return cls(workers=1, train_cases=8, validation_cases=3, test_cases=3,
+        return cls(seed=20261119, test_seed=20261120, workers=1, train_cases=8, validation_cases=3, test_cases=3,
                    pretrain_epochs=2, fine_tune_epochs=1, decoder_epochs=2,
                    hidden=(8, 8, 8), batch_size=4, decoder_batch_size=4)
 

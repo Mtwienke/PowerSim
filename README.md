@@ -97,6 +97,8 @@ python -m powersim.reproduction artifacts/gao-reconstruction --plan
 python -m powersim.reproduction artifacts/gao-reconstruction
 # After an interrupted driver and all its children have stopped:
 python -m powersim.reproduction artifacts/gao-reconstruction --resume
+# After completion: verify hashes and generate descriptive JSON/Markdown reports.
+python -m powersim.reproduction_analysis artifacts/gao-reconstruction
 ```
 
 This opt-in workload freezes committed source: **18 trainings, 18 decoders,

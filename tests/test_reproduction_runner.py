@@ -21,7 +21,7 @@ def test_frozen_plan_distinguishes_all_hypotheses_and_keeps_germany_out(tmp_path
     assert plan["counts"] == {"datasets": 1, "trainings": 18, "decoders": 18, "calibrations": 1,
                               "attack_datasets": 36, "evaluations": 165, "stages": 239}
     assert plan["dataset_configuration"]["simulation"]["benchmark"] == "case30"
-    assert plan["dataset_configuration"]["test_seed"] == 20281119
+    assert plan["dataset_configuration"]["test_seed"] == 20281121
     assert plan["dataset_configuration"]["renewable_capacities_mw"] == [185, 230, 300]
     training = plan["training"]
     assert training["source-informed"]["M5"]["loss_weights"]["L3"] == 1

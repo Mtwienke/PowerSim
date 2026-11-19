@@ -23,7 +23,7 @@ explicit decision to proceed with labelled hypotheses. No author is contacted.
   Weibull/Beta parameters, cubic wind curve and PV performance ratio 0.85.
   These unresolved choices are held fixed rather than fit to published numbers.
 - Seed **2027** for placement, training/validation scenarios and ML.
-  Separate **20281119** test streams create new IID/OOD conditions. Test records
+  Separate **20281121** test streams create new IID/OOD conditions. Test records
   must not enter fitting, model selection, decoder training or calibration.
 - Collect **10,000 valid training, 1,000 valid validation, 2,000 valid cases per
   test regime**. Replace failed attempts until that target, with a declared
@@ -130,6 +130,13 @@ Do not equate improved prediction accuracy with strict physical feasibility.
 
 ## Integrity, stopping and analysis
 
+**Pre-full-run seed amendment:** the initial frozen plumbing driver used
+20281119 for its tiny test streams. To avoid even prefix overlap with those
+plumbing cases, the full suite reserves **20281121**, before full training or
+evaluation. No smoke accuracy is used to choose this seed or any numerical
+setting. Subsequent `--smoke` defaults use separate 20261119/20261120 seeds.
+This is an isolation change, not a search over favorable test outcomes.
+
 Commit each substantive implementation/protocol step. Freeze committed source,
 package versions, settings and hashes before the full run. Use new stage/attempt
 directories, resumable hash checks and one live driver lock; never overwrite old
@@ -157,6 +164,8 @@ Historical defaults and saved models remain compatible.
 ```sh
 python -m powersim.reproduction artifacts/gao-reconstruction --plan
 python -m powersim.reproduction artifacts/gao-reconstruction
+# After the full driver has completed:
+python -m powersim.reproduction_analysis artifacts/gao-reconstruction
 ```
 
 The runner freezes committed source and records every stage's input/output
@@ -167,3 +176,14 @@ run, or resumption through the original frozen source/environment.
 
 Preflight and a tiny `--smoke` workflow precede the full run. Full-run results
 will be recorded after completion, not inferred from smoke accuracy.
+
+Preflight completed so far:
+
+- Full regression suite: **141 passed**; subsequent runner/report checks:
+  **six passed**. `pip check` is clean.
+- Historical final M1/M2/M4/M5 batched predictions are **bitwise identical**
+  under the extended loader.
+- All **135 earlier pilot output hashes** remain unchanged.
+- The first actual tiny workflow is frozen at **`6252b8f`** under
+  `artifacts/gao-reconstruction-smoke-20261119/`. Its purpose is orchestration
+  validation only; no smoke accuracy informs full-run settings.
