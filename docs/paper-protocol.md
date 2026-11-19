@@ -66,6 +66,30 @@ declared sensitivity experiment is needed before treating this as the paper's
 definition. Matching the printed percentages alone does not establish matching
 operating distributions.
 
+## IEEE-30 sensitivity-tail diagnostic
+
+A separate read-only check during the new pilot examined the existing
+seed-2027 IEEE-30 training labels. Two of the 9,425 valid training cases account
+for **96.1854% of the reference Jacobians' total squared magnitude**. Their
+largest absolute derivative is **1,555.846 MW/MW**. Both have active branches
+`line:9`, `line:28`, `line:29`, `line:34`, plus a source at its upper bound.
+The KKT condition number is approximately 690,805, below the implementation's
+singularity rejection threshold but much larger than typical training cases.
+
+The extreme derivatives are not merely an assumed label bug. At training
+attempt 7,163 (filtered row 6,749), independent central finite differences of
+fresh DC-OPF solves at bus 7 preserve the active branch set. Perturbations of
+0.001 and 0.0001 MW reproduce the stored derivative to maximum relative
+errors of approximately **1.21e-8** and **8.86e-11**, respectively. The baseline
+re-solve reproduces saved generation exactly.
+
+This identifies a possible sensitivity-learning difficulty, not a reason to
+delete those cases or silently clip L1. Reference squared magnitude is not
+itself the trained loss or its gradient contribution; those require separate
+checkpoint diagnostics. The current run keeps all labels and unit weights
+unchanged. Any robustness treatment must be reported as a separate ablation,
+and the paper's unspecified sampling/branch-limit settings still matter.
+
 ## Accuracy is not feasibility, and selection is not hybrid completion
 
 Equation (26) uses **strict error < 1 MW**, but leaves vector reduction unclear.
