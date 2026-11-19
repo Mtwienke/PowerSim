@@ -57,6 +57,9 @@ their intentionally limited interpretation.
 The explicitly requested [full 2026-11-18 suite](docs/full-experiment-results.md)
 also completed: all 57 stages and 42 evaluations. Its results expose important
 feasibility limitations and do not establish reproduction of the paper's claims.
+The [seed-2027 IEEE/German suite](docs/full-experiment-seed2027.md) completed
+all 114 stages and 84 evaluations using eight workers in 32m 29s, with separate
+coverage, accuracy and feasibility reporting for each grid.
 
 ## What is implemented
 
