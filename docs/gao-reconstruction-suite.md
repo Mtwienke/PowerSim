@@ -187,3 +187,14 @@ Preflight completed so far:
 - The first actual tiny workflow is frozen at **`6252b8f`** under
   `artifacts/gao-reconstruction-smoke-20261119/`. Its purpose is orchestration
   validation only; no smoke accuracy informs full-run settings.
+
+The real smoke workflow **completed all 239 stages / 165 evaluations**, with
+**829 required output hashes verified**. The read-only JSON/Markdown analysis
+path also passed against those real artifacts. Startup contention with the
+regression tests makes its runtime unsuitable for a full-run estimate.
+
+Full-budget run root reserved after these checks:
+`artifacts/gao-reconstruction-full-20261119T133302Z/`.
+The driver will record its exact frozen commit and full-budget configuration in
+`suite_manifest.json`. Prelaunch free disk: **20.1 GiB**, with a 5 GiB stop reserve.
+No numerical setting or threshold was selected from smoke accuracy.
