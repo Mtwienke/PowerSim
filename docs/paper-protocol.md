@@ -38,6 +38,34 @@ specified for exact numerical reproduction. Current choices remain declared
 assumptions. The paper's introductory example describes 20% load fluctuation;
 this is consistent with, but does not fully specify, our relative-load sampler.
 
+## Penetration-denominator hypothesis (not author-verified)
+
+During the IEEE-30 pilot, an independent arithmetic check found a specific
+candidate for the paper's unspecified penetration definition. Our IEEE-30
+conventional source capacities sum to **335 MW**. If penetration instead means
+`renewable nameplate / (conventional nameplate + renewable nameplate)`, these
+round renewable capacities reproduce every Table II percentage:
+
+| Renewable MW | `R / (335 + R)` | Rounded paper rate | Our existing renewable MW |
+|---:|---:|---:|---:|
+| 185 | 35.576923% | 35.58% | 67.31736 |
+| 230 | 40.707965% | 40.71% | 77.02332 |
+| 300 | 47.244094% | 47.24% | 89.37808 |
+
+Our dataset uses `renewable nameplate / nominal gross demand`, with demand
+189.2 MW. The candidate total-capacity definition would imply both substantially
+larger installations and a stronger capacity increase: **62.2%** from 185 to
+300 MW, versus **32.8%** from 67.31736 to 89.37808 MW. Mean realized renewable
+generation in our reference-valid tests is only 8.53%, 9.70%, and 11.18% of
+sample demand.
+
+This exact rounded match is evidence for a testable hypothesis, **not proof of
+the authors' sampling code**. No capacity, dataset, training or threshold was
+changed on its basis in the running pilot. Author clarification or a separately
+declared sensitivity experiment is needed before treating this as the paper's
+definition. Matching the printed percentages alone does not establish matching
+operating distributions.
+
 ## Accuracy is not feasibility, and selection is not hybrid completion
 
 Equation (26) uses **strict error < 1 MW**, but leaves vector reduction unclear.
