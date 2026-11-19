@@ -10,6 +10,12 @@ This is an approximate reconstruction, not recovered author settings. The
 earlier recommendation to wait for missing source is superseded by the user's
 explicit decision to proceed with labelled hypotheses. No author is contacted.
 
+**Completion update (after execution):** all **239 stages / 165 evaluations**
+completed with **829 required output hashes verified**, frozen at `e83e085`.
+The [measured full-suite report](gao-reconstruction-results.md) records the
+improvement over the earlier pilot and the remaining M5-ranking/feasibility
+failure. The predeclared numerical protocol below was not retuned.
+
 ## New data, old artifacts preserved
 
 - Keep the bundled IEEE-30 topology, source costs/bounds and **unscaled branch
@@ -154,7 +160,7 @@ Separate the bundled effects of changed data/numerics from causal ablations.
 Single-seed agreement would still leave conversion/placement, framework,
 DeepOPF and other-system reproduction gaps.
 
-## Execution results
+## Execution record
 
 Implementation includes opt-in numerical profiles, bounded successful-sample
 collection, physical decoder norms, source-like branch-event reporting, separate
@@ -174,10 +180,12 @@ new attempt directories. Do not steal `.suite.lock`; verify the old driver and
 children have stopped first. Source/package/configuration changes require a new
 run, or resumption through the original frozen source/environment.
 
-Preflight and a tiny `--smoke` workflow precede the full run. Full-run results
-will be recorded after completion, not inferred from smoke accuracy.
+Preflight and a tiny `--smoke` workflow preceded the full run. The launch
+record below was committed before execution; measured results are recorded
+separately in the [completed report](gao-reconstruction-results.md), not
+inferred from smoke accuracy.
 
-Preflight completed so far:
+Preflight at launch:
 
 - Full regression suite: **141 passed**; subsequent runner/report checks:
   **six passed**. `pip check` is clean.
@@ -193,8 +201,16 @@ The real smoke workflow **completed all 239 stages / 165 evaluations**, with
 path also passed against those real artifacts. Startup contention with the
 regression tests makes its runtime unsuitable for a full-run estimate.
 
-Full-budget run root reserved after these checks:
+Full-budget run root reserved after these checks (prelaunch record):
 `artifacts/gao-reconstruction-full-20261119T133302Z/`.
-The driver will record its exact frozen commit and full-budget configuration in
+The driver recorded its exact frozen commit and full-budget configuration in
 `suite_manifest.json`. Prelaunch free disk: **20.1 GiB**, with a 5 GiB stop reserve.
 No numerical setting or threshold was selected from smoke accuracy.
+
+The full run completed **2026-11-19, 13:33:59–14:43:03 UTC** in **69m 03.75s**:
+18 model trainings, 18 decoders, 36 attack datasets and 165 evaluations.
+The frozen post-completion analyzer reverified all 829 required output hashes
+and the archived source. Primary M5 OOD2 accuracy is **89.375%**, versus
+**90.167%** for M1 and **97.94%** for paper M5. The full improvement and
+negative findings, control variants, gates and target conventions are retained
+in the linked report. No settings or checkpoints were replaced afterward.

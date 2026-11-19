@@ -109,6 +109,13 @@ accuracy tuning. Existing datasets, checkpoints and generic defaults are kept.
 `M3-example` is explicitly the Gao branch-penalty comparator, not a claim of
 complete external DeepOPF reproduction.
 
+The [completed reconstruction results](docs/gao-reconstruction-results.md)
+cover **239 stages in 69m 04s**, with **829 output hashes verified**. Primary M5
+highest-regime accuracy improves from the earlier pilot's **31.01% to 89.38%**,
+but still trails M1 (**90.17%**) and paper M5 (**97.94%**). The published M5
+advantage remains unreproduced, and raw M5 strict feasibility is **0%**.
+The report separates decoder/fallback improvements and FGSM target conventions.
+
 ## What is implemented
 
 - Validated DC/AC configuration, immutable nodal policy inputs, actual polynomial

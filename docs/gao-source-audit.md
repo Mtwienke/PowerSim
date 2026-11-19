@@ -98,8 +98,11 @@ common-M1 initialization and unit weights in the IEEE-30 study.
 
 `M3.py` adds a normalized squared branch-flow excess penalty to supervised MAE
 and warm-starts from M1. This alone does not establish a complete faithful
-implementation of the external DeepOPF algorithm cited by the journal. **Our
-M3 remains unimplemented**, not replaced by this example or a leave-one-out.
+implementation of the external DeepOPF algorithm cited by the journal. **The
+complete external M3 remains unimplemented**. The later reconstruction includes
+the explicitly labelled `M3-example` comparator, not a claim of full DeepOPF
+or a leave-one-out replacement; see the
+[completed results](gao-reconstruction-results.md).
 
 ### Framework-dependent deductions, not recorded training metadata
 
