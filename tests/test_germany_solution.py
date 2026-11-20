@@ -16,15 +16,22 @@ from powersim.solver import evaluate_decision, solve_reference
 
 def test_germany30_reference_and_provenance():
     data = germany_case_data()
+    assert data["schema_version"] == 2
     assert data["provenance"]["license"] == "ODbL-1.0"
     assert len({node for bus in data["buses"] for node in bus["source_buses"]}) == 780
+    region_sizes = [len(bus["source_buses"]) for bus in data["buses"]]
+    assert min(region_sizes) >= 15 and max(region_sizes) <= 40
+    assert data["provenance"]["region_bus_count_max"] == max(region_sizes)
+    assert data["provenance"]["border_ac_lines_excluded"] == 42
+    assert data["provenance"]["hvdc_capacity_mw_excluded"] == 3600.
     config = SimulationConfig(benchmark="germany30")
     net = make_case(config)
     result = solve_reference(net, config)
-    assert len(net.bus) == 30 and len(result.branches) == 53
+    assert len(net.bus) == 30 and len(result.branches) == 54
     assert result.status == "ok", result.diagnostics
-    assert any(branch.active for branch in result.branches)
-    assert sum(nodal_loads(net)) == pytest.approx(41400.)
+    assert not any(branch.violated for branch in result.branches)
+    assert max(branch.loading_percent for branch in result.branches) > 70.
+    assert sum(nodal_loads(net)) == pytest.approx(63400.)
     assert len(result.generator_ids) == 18
     audit = evaluate_decision(net, DispatchDecision(active_power_mw=result.generation_mw), config)
     assert audit.status == "ok" and audit.metrics["feasible"]
@@ -72,7 +79,7 @@ def test_replay_german_renewables_once_and_export_offline(tmp_path, capsys):
     manifest = generate_dataset(folder, config)
     record = json.loads((folder/"train.jsonl").read_text().splitlines()[0])
     net, result, gross, fixed = dataset_solution(folder, "train", 0)
-    assert sum(manifest["nominal_gross_load_mw"]) == pytest.approx(48000.)
+    assert sum(manifest["nominal_gross_load_mw"]) == pytest.approx(70000.)
     np.testing.assert_allclose(np.array(gross)-fixed, record["net_load_mw"], atol=1e-10)
     fig = solution_figure(net, result, demand=gross, renewables=fixed)
     assert "OpenStreetMap" in fig.layout.title.text

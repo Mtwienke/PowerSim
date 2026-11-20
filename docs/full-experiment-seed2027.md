@@ -1,5 +1,13 @@
 # Seed 2027: IEEE-30 + Germany-30, eight workers
 
+> **Benchmark revision (2026-11-20).** The Germany-30 bundle was reworked to
+> schema version 2: a balanced 30-region partition, 70 GW near-peak demand, a
+> 1.25× conventional reserve margin, and a monotone illustrative merit order.
+> The Germany results below were produced with the pre-revision schema-v1
+> bundle at commit `043c7d5` and are **not reproducible from the current
+> `germany30.json`**. They remain a valid record of that bundle, not a result
+> for the current benchmark. See [germany30.md](germany30.md#assumption-audit-2026-11-revision).
+
 **Completed 2026-11-19: 114/114 stages, 84/84 evaluations in 32 min 29 s.**
 All **324 required stage output hashes** were verified afterward; no mismatches.
 Subsequent [full-text analysis](paper-protocol.md) identified a different paper
