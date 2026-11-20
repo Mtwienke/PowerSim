@@ -4,9 +4,14 @@ Target: Gao et al., *A Trustable Data-Driven Optimal Power Flow Computational
 Method With Robust Generalization Ability*, DOI
 [10.1109/TNNLS.2024.3437741](https://doi.org/10.1109/TNNLS.2024.3437741).
 This implementation is paper-inspired, not a claim of numerical reproduction.
-The DOI metadata/abstract were accessible during implementation, not the full
-Section III or experiment tables. Exact M1–M5 combinations are unverified;
-descriptive configurable ablations are used instead.
+The initial implementation and historical suites used the metadata/abstract.
+The full article was supplied on 2026-11-19; the [full-text audit and shared-M1
+pilot](paper-protocol.md) records verified methods, training settings, metric
+interpretation and remaining ambiguities. Historical results are not rewritten.
+The later [public-source audit](gao-source-audit.md) identifies example-specific
+ReLU/batching/per-unit/masking conventions and explicit conflicts with the final
+journal. These are evidence for separately declared controls, not silent changes
+to the implementation described below.
 
 Pandapower is pinned to 3.5.6 because the DC map/branch adapter uses its internal
 PPC ordering and limits. Upgrade deliberately with the real reference/PF,
@@ -99,13 +104,24 @@ approximations; inspect conditioning/active-set stability for published runs.
 
 Optional `.[ml]` installs PyTorch; basic reference/data commands never import it.
 `train --method baseline` uses L0 only. `--method physics-guided` enables L0–L5
-with equal weights (an explicit assumption, **not** verified paper weights).
+with equal weights (confirmed in the full paper).
+Explicit aliases `M1`, `M2`, `M4`, `M5` select the Table I objectives:
+L0, L0+L1, L0–L4 and L0–L5, respectively. M3 is DeepOPF, not a loss ablation.
 `--loss-weights '{"L1":0,"L5":0.1}'` overrides any terms independently.
 Three 200-neuron hidden layers are the default. Assumptions: tanh activation,
 linear output, Adam with learning rate 0.001, batch size 64, 100 epochs,
 CPU float32, deterministic algorithms, best validation generation MSE checkpoint.
 Architecture, activation, batch size, epochs, seed and all TrainConfig fields
 are configurable. Smoke commands use three 16-neuron layers and three epochs.
+These generic defaults are retained for compatibility, not claimed to match the
+paper's training schedule. `pilot DATASET OUTPUT` explicitly performs 1,000 M1
+epochs, then 200 warm-started epochs for M1-continued/M2/M4/M5 at learning rate
+0.01 on unchanged data. It reports train/validation metrics, not held-out tests.
+`--initialize-from` loads checked compatible weights with fresh Adam state.
+Every training saves best-validation, final and selected checkpoints; use
+`--checkpoint-selection last` to select the final epoch. New checkpoints record
+initializer and train/validation hashes. Shuffle and perturbation streams are
+independent, preserving batch order across loss ablations.
 
 Inputs/outputs are centered and scaled **using training statistics only**.
 Constant dimensions have scale 1 MW. Public forward evaluation takes raw MW
@@ -128,16 +144,20 @@ number of selected entries; empty masks contribute zero):
   not a claim of physically sampled weather. L3/L4 are never imposed there.
 
 L1–L5 have units (MW/MW)². Their weighting relative to L0 is configurable;
-equal weights are not scale invariant. ReLU is selectable but its second
-derivatives are zero almost everywhere; tanh is the smooth default. No test
+equal weights are not scale invariant. ReLU has zero input Hessians almost
+everywhere, but mixed input/parameter derivatives can still train Jacobian
+penalties; the smooth tanh default is an unverified activation assumption. No test
 labels enter training, early stopping, decoder training or calibration.
 
 ## Decoder and online decisions
 
 The separate tanh decoder reconstructs **normalized nodal net loads** from
 the OPF network's **penultimate hidden layer (`hidden[-2]`, second of three)**.
-This is an explicit interpretation of the requested representation, not a
-verified paper layer choice. The OPF network is frozen; decoder Adam training
+The layer choice is confirmed by the full paper. `--hidden 128,128` selects the
+paper's two-hidden-layer topology (widths remain assumptions); a single width
+retains the legacy one-hidden-layer decoder. The paper uses 1,000 decoder epochs
+and learning rate 0.001; generic smoke-compatible defaults remain 100 epochs.
+The OPF network is frozen; decoder Adam training
 uses training inputs only, selecting decoder weights on validation reconstruction
 error. Threshold is the `higher` empirical quantile (default 95%) of
 **validation-only** per-scenario reconstruction errors.
@@ -147,6 +167,10 @@ buses**. Default units are dimensionless normalized-input squared units.
 `decoder --error-units mw2` instead rescales each residual to MW before averaging,
 yielding MW²; artifact metadata records the choice and threshold. Decoder files
 are cryptographically bound to the OPF checkpoint.
+`mae_mw` and `rmse_mw` expose physical MAE/RMSE in MW. `--threshold` explicitly
+sets a fixed threshold in the selected score units, recorded separately from
+quantile calibration. The paper's reported 6/7 MW thresholds cannot be copied
+into normalized MSE without an assumption about its undisclosed error norm.
 `powersim calibrate DATASET MODEL DECODER OUTPUT --quantile 0.95` is an explicit
 threshold-only recalibration command (also restricted to validation inputs).
 
@@ -169,6 +193,13 @@ unsuccessful, not as zero error. Accuracy sample count is reported; reference
 failures are excluded from error metrics and reported separately. A second
 conservative success rate includes all originally requested scenarios in its
 denominator. Accepted-subset and complete-hybrid metrics are both reported.
+New reports additionally expose strict individual-source and joint-scenario
+`< 1 MW` accuracy, their counts/denominators, accepted-only physics, fallback-only
+accuracy and explicit neural coverage. Generator-wise aggregation is strongly
+suggested by Table V, but Eq. (26) does not define vector reduction precisely.
+The legacy `success_rate_1mw` remains inclusive `<= 1 MW`. Empty selected subsets
+have null conditional accuracy, not perfect accuracy. Accuracy/physical-risk
+curves use validation-derived/explicit thresholds without test-time selection.
 
 Independent raw/hybrid PF audits report absolute raw balance residuals,
 generator/branch violation counts and feasibility. Objective gap is
@@ -213,7 +244,8 @@ with an unspecified accelerated solver.
 
 - Dataset: `network.json` (source pandapower network), `manifest.json`, split
   JSONL (including failures), `dataset.npz`.
-- OPF model: `model.pt`, `training.json` (loss history and validation selection).
+- OPF model: selected `model.pt`, `best.pt`, `last.pt`, `training.json`
+  (loss/validation history, fitting accuracy and initialization provenance).
 - Decoder: `decoder.pt`, `decoder.json` (frozen model binding, calibration IDs).
 - Evaluation: `evaluation.json`, `predictions.jsonl`, `predictions.npz`.
 - Production rejections: separate JSONL selected with `--production-log`.
@@ -226,11 +258,16 @@ proved mathematical infeasibility.
 
 ## Remaining differences from the publication
 
-No claim of matching published accuracy, runtime or M1–M5 ablations. Full text
-and original code/seed/placement/cost/limit settings were not available for
-verification. Conversion curves, nameplate interpretation of penetration,
-IID/OOD design, 90% thermal stress, independent load/weather draws, decoder
-layer/architecture/threshold quantile, optimizer and activation are configurable
-assumptions. KKT derivatives cover regular DC QPs only, not active-set
+No claim of matching published accuracy/runtime. The full text confirms
+method objectives and a two-stage training schedule. Public example code was
+subsequently found and [audited](gao-source-audit.md), but the full dataset and
+generator remain inaccessible through our anonymous access. Several example
+settings conflict with the journal, so final-paper seed/placement/limit settings
+and numerical training protocol are not yet verified.
+Conversion curves, nameplate interpretation of penetration, IID/OOD design,
+90% thermal stress, independent load/weather draws, decoder widths/norm/threshold
+calibration, activation, batch size and checkpoint selection remain configurable
+assumptions. The German benchmark is a separate transfer experiment. KKT
+derivatives cover regular DC QPs only, not active-set
 transitions, nonconvex AC OPF, or unsupported network devices. There is no
 retraining service, feasibility repair or robustness certificate.

@@ -57,6 +57,64 @@ their intentionally limited interpretation.
 The explicitly requested [full 2026-11-18 suite](docs/full-experiment-results.md)
 also completed: all 57 stages and 42 evaluations. Its results expose important
 feasibility limitations and do not establish reproduction of the paper's claims.
+The [seed-2027 IEEE/German suite](docs/full-experiment-seed2027.md) completed
+all 114 stages and 84 evaluations using eight workers in 32m 29s, with separate
+coverage, accuracy and feasibility reporting for each grid.
+
+## Full-paper-aligned training pilot
+
+The [full-text audit](docs/paper-protocol.md) confirms a **1,000-epoch M1 baseline
+followed by 200 warm-started epochs**, not the independent 100-epoch trainings
+used in the historical suites. Preview a pilot on an existing dataset:
+
+```sh
+powersim pilot DATASET artifacts/gao-pilot --plan
+# Explicitly launch training/validation only:
+powersim pilot DATASET artifacts/gao-pilot
+```
+
+The pilot shares one M1 initializer across M1-continued/M2/M4/M5, uses learning
+rate 0.01, records provenance, keeps best/final checkpoints and supports
+hash-checked `--resume`. It does not regenerate scenarios or evaluate held-out
+data. Add `--learning-rates 0.01,0.001` for a declared stability control.
+Generic training defaults and existing model/decoder files remain compatible.
+The completed [IEEE-30 pilot](docs/ieee30-pilot-seed2027.md) follows this schedule
+but **does not reproduce the paper's accuracy or method ranking**; its report
+separates fitting failure, data-definition uncertainties and decoder coverage.
+The subsequent [public-source audit](docs/gao-source-audit.md) found concrete
+numerical differences **and conflicts between the examples and final paper**.
+It preserves both specifications rather than silently mixing their settings.
+
+## Source-informed full reconstruction suite
+
+The user-authorized [reconstruction protocol](docs/gao-reconstruction-suite.md)
+proceeds without the missing full project. It keeps **Germany excluded**, uses
+explicit 185/230/300 MW capacity and per-unit/ReLU hypotheses, and separately
+reports source-informed, journal-equation and literal-example numerical variants.
+
+```sh
+python -m powersim.reproduction artifacts/gao-reconstruction --plan
+python -m powersim.reproduction artifacts/gao-reconstruction
+# After an interrupted driver and all its children have stopped:
+python -m powersim.reproduction artifacts/gao-reconstruction --resume
+# After completion: verify hashes and generate descriptive JSON/Markdown reports.
+python -m powersim.reproduction_analysis artifacts/gao-reconstruction
+```
+
+This opt-in workload freezes committed source: **18 trainings, 18 decoders,
+165 evaluations**, including new IID/OOD test streams, decoder/fallback
+comparisons and 1 MW FGSM with separately re-solved physical labels.
+`--smoke` runs the same workflow with tiny budgets for plumbing tests, not
+accuracy tuning. Existing datasets, checkpoints and generic defaults are kept.
+`M3-example` is explicitly the Gao branch-penalty comparator, not a claim of
+complete external DeepOPF reproduction.
+
+The [completed reconstruction results](docs/gao-reconstruction-results.md)
+cover **239 stages in 69m 04s**, with **829 output hashes verified**. Primary M5
+highest-regime accuracy improves from the earlier pilot's **31.01% to 89.38%**,
+but still trails M1 (**90.17%**) and paper M5 (**97.94%**). The published M5
+advantage remains unreproduced, and raw M5 strict feasibility is **0%**.
+The report separates decoder/fallback improvements and FGSM target conventions.
 
 ## What is implemented
 
@@ -68,11 +126,13 @@ feasibility limitations and do not establish reproduction of the paper's claims.
 - Seeded load/wind/PV scenarios, documented conversion curves, failed-solve
   records, separate train/validation/IID/OOD splits, training-only normalization.
 - Configurable three-hidden-layer baseline (default 200 neurons/layer) and
-  individually configurable L0–L5 Jacobian losses; KKT reference sensitivities.
+  individually configurable L0–L5 Jacobian losses; KKT reference sensitivities,
+  checked weights-only warm starts and a shared-M1 paper-schedule pilot.
 - Frozen-OPF decoder training, validation-only calibration, learned/OPF hybrid
   routing with explicit fallback failure and separate production rejection logs.
 - Measured accuracy, physical feasibility, feasible-only objective gaps,
-  acceptance/fallback rates, CPU latency and separately measured batch throughput.
+  individual-source and joint-scenario accuracy, accepted-subset coverage,
+  reconstruction selection curves, CPU latency and separate batch throughput.
 
 The dashboard exposes physics, benchmark and numerical/heuristic methods.
 Learned inference is disabled until matching trained model/decoder paths are
@@ -117,7 +177,8 @@ powersim plot-solution artifacts/sample.html --dataset artifacts/germany-data --
 See [docs/research.md](docs/research.md) for loss equations, normalization,
 sensitivity regularity, metric denominators, CLI configuration, renewable
 penetration definitions and remaining differences from the paper. Full-text
-M1–M5 combinations were not verified: methods use descriptive names.
+M1/M2/M4/M5 objectives are now verified; M3 is DeepOPF, not an implemented
+leave-one-out ablation. See the [paper protocol](docs/paper-protocol.md).
 Conversion curves, validation size, activation and training settings are explicit
 assumptions. The stress preset scales branch limits to 90% of bundled limits;
 manifests report actual active sets and label failures rather than assuming

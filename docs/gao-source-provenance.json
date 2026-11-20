@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/AI4POWER/Data-Driven-OPF-Method-Considering-Inherent-Pattern",
+  "revision": "e775ce3a24af0408aed9c02236abd862707cbae0",
+  "revision_date_utc": "2024-06-06T06:38:24Z",
+  "inspection_date": "2026-11-19",
+  "license_detected": null,
+  "scope": "Static reference inspection only. No upstream implementation is vendored or executed.",
+  "files": [
+    {"path": "30-bus/M1.py", "git_blob_sha1": "26dffa53e313d8bf06a455d9863a0e65a692b164", "sha256": "b1088f6dac976126097163e2252362ae9e5bdb3f03d62e6ff041ad8d36f23645"},
+    {"path": "30-bus/M2.py", "git_blob_sha1": "18062e4d2682d0d7a0fb2c47351ebe8cfc6db215", "sha256": "fc1d8d18ce3f6a599e3d585e2f87bb887c0f1431877f4a53fb078b6d4cd5469f"},
+    {"path": "30-bus/M3.py", "git_blob_sha1": "e6bd38793c52bbd2df019beb498214807256923a", "sha256": "9d4d09e3bc12852c0876bed47fe142485c7096eb28d7ce7cf40b8ddeb73c27ff"},
+    {"path": "30-bus/M4.py", "git_blob_sha1": "cc6639cce1ddb1cdebdb9bb027f813023a7f3cf3", "sha256": "d8b13f593ef252d5aeac3bb39aedcc1429d4ef130b841b43e255b4f33c0c8b25"},
+    {"path": "30-bus/M5.py", "git_blob_sha1": "f0adecfb8010253bcad6f49035a781f2c9e924fe", "sha256": "08f0cd8443bc2fe023b00f9b880ac205ab57984cef93e7460fe0e7f31c294624"},
+    {"path": "30-bus/draw_figure.py", "git_blob_sha1": "498c955242b652aa80c2aa997951ebe372f424bb", "sha256": "af0913ee131ab6d8e6cfebf4b1fba02ec15f7a8f231c48a3dd75fb1676aa4882"},
+    {"path": "30-bus/draw_loss_curve.py", "git_blob_sha1": "7f7c254ad02d9cc0624563a26e7d8bdbbf0bb21e", "sha256": "4f735080a09f22309fa9c9ff494c170cb486ddee7bdc5e88e5fb3ca5217fcd9c"},
+    {"path": "30-bus/draw_violation.py", "git_blob_sha1": "0394c51023c2bd62563f6d35434887177fb563f1", "sha256": "c6a2ce20f20f5209abd6109f966ae51689387cc65b5650cd786f0d94c5655571"},
+    {"path": "30-bus/violation_calculation.py", "git_blob_sha1": "210860e339ec7914b97e8711b8eedea9edba4413", "sha256": "c83c6f0a08266fcd291d522c0c498c9d3b186bed70c47d17743c4b1498caf2b1"},
+    {"path": "57-bus/M1.py", "git_blob_sha1": "cf543b303ce1cbefdd2d6a95b58af1c950027bf6", "sha256": "7d593bfade6dc3826cabcd78cf1babd88022b1ea01612b0df9cdfdbb83e44b92"},
+    {"path": "57-bus/M2.py", "git_blob_sha1": "2e5b61fb69e13cb948c2af970814aca696f77501", "sha256": "fcabc44de0bb2c2d0ff08d923dfa741b3f03b9d713819885c06ef9a635c8b794"},
+    {"path": "57-bus/M3.py", "git_blob_sha1": "23e28d28ad42efd758a46e51d212142b7a60d831", "sha256": "7d718a4b3d4c5d310092004e7af739f1a5b4c42ce2f6580f6ae1a54035b88897"},
+    {"path": "57-bus/M4.py", "git_blob_sha1": "c6f18dc29c3d2d259ca0aa2d76411f30181ffcfa", "sha256": "74b0c9dbab0aada4f83fa470c87a4948371a6f446b77ece04de7e95b2bcc4007"},
+    {"path": "57-bus/M5.py", "git_blob_sha1": "f0b70f63b88c52b2de563ca3b3e574c56865cfb1", "sha256": "4483ea1032ec4bd79cc7106b95b2d248109634734619a50375e989e9baa776a5"},
+    {"path": "57-bus/adaptability judgement/feature_in_hidden_layer.py", "git_blob_sha1": "826b5629479430c51dc38ceffc6b56997e2a8e4b", "sha256": "73eb0a9664390a6c9df770028cb4eb29717de140698e830a5dcdb0595cde9cf9"},
+    {"path": "57-bus/adaptability judgement/train_decoder_hidden.py", "git_blob_sha1": "3fda9a827cd4361bd83de72dce7bbddac3b55b85", "sha256": "836d863563bbc8e0c1839004255b18aaac9a7078c1d4e155936900139bb9e16f"},
+    {"path": "README.md", "git_blob_sha1": "8a8e0b92f8510092dfcbd9ce33246d0a91484f2d", "sha256": "12d61ed60171e918295b0f35a26587c44d521ed86eeedbe53705923598d428c5"}
+  ]
+}

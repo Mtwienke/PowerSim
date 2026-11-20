@@ -9,6 +9,23 @@ from .network import make_case
 from .solver import solve_reference
 
 
+def _hidden_widths(value):
+    try:
+        widths = tuple(int(part) for part in value.split(","))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Use comma-separated positive hidden widths") from exc
+    if not widths or min(widths) < 1:
+        raise argparse.ArgumentTypeError("Hidden widths must be positive")
+    return widths
+
+
+def _learning_rates(value):
+    try:
+        return tuple(float(part) for part in value.split(","))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Use comma-separated learning rates") from exc
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="powersim")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -27,12 +44,15 @@ def main(argv=None):
     train = commands.add_parser("train", help="Train baseline or configurable physics-guided DC network")
     train.add_argument("dataset")
     train.add_argument("output")
-    train.add_argument("--method", choices=["baseline", "physics-guided"], default="baseline")
+    train.add_argument("--method", choices=["baseline", "physics-guided", "M1", "M2", "M3-example", "M4", "M5"], default="baseline")
     train.add_argument("--epochs", type=int, default=100)
-    train.add_argument("--hidden", default="200,200,200")
+    train.add_argument("--hidden", type=_hidden_widths, default=(200, 200, 200))
     train.add_argument("--batch-size", type=int, default=64)
     train.add_argument("--activation", choices=["tanh", "relu", "silu"], default="tanh")
     train.add_argument("--seed", type=int, default=2026)
+    train.add_argument("--learning-rate", type=float, default=.001)
+    train.add_argument("--checkpoint-selection", choices=["best_validation", "last"], default="best_validation")
+    train.add_argument("--initialize-from", help="Compatible model checkpoint; weights only, with fresh Adam state")
     train.add_argument("--loss-weights", help='JSON overrides, e.g. \'{"L1":0,"L5":0.1}\'')
     train.add_argument("--config", help="JSON TrainConfig overrides (learning rate, perturbation, etc.)")
     decoder = commands.add_parser("decoder", help="Train frozen-network decoder and calibrate on validation only")
@@ -41,17 +61,36 @@ def main(argv=None):
     decoder.add_argument("output")
     decoder.add_argument("--epochs", type=int, default=100)
     decoder.add_argument("--batch-size", type=int, default=64)
-    decoder.add_argument("--hidden", type=int, default=128)
+    decoder.add_argument("--hidden", type=_hidden_widths, default=(128,), help="One or more hidden widths, e.g. 128,128")
+    decoder.add_argument("--learning-rate", type=float, default=.001)
     decoder.add_argument("--quantile", type=float, default=.95)
-    decoder.add_argument("--error-units", choices=["normalized", "mw2"], default="normalized")
+    decoder.add_argument("--error-units", choices=["normalized", "mw2", "mae_mw", "rmse_mw", "l1_mw", "linf_mw"], default="normalized")
+    decoder.add_argument("--threshold", type=float, help="Explicit fixed threshold in the chosen score units (not an accuracy guarantee)")
     decoder.add_argument("--seed", type=int, default=2026)
+    decoder.add_argument("--config", help="JSON decoder overrides, including activation, feature layer and optimizer numerics")
     calibration = commands.add_parser("calibrate", help="Recalibrate a decoder threshold on validation only")
     calibration.add_argument("dataset")
     calibration.add_argument("model")
     calibration.add_argument("decoder")
     calibration.add_argument("output")
     calibration.add_argument("--quantile", type=float, default=.95)
-    calibration.add_argument("--error-units", choices=["normalized", "mw2"])
+    calibration.add_argument("--error-units", choices=["normalized", "mw2", "mae_mw", "rmse_mw", "l1_mw", "linf_mw"])
+    calibration.add_argument("--threshold", type=float, help="Explicit fixed threshold instead of a validation quantile")
+    pilot = commands.add_parser("pilot", help="Shared-M1, warm-started Gao training pilot on an existing DC dataset")
+    pilot.add_argument("dataset")
+    pilot.add_argument("output")
+    pilot.add_argument("--pretrain-epochs", type=int, default=1000)
+    pilot.add_argument("--fine-tune-epochs", type=int, default=200)
+    pilot.add_argument("--learning-rates", type=_learning_rates, default=(.01,), help="Add 0.001 as an explicit stability control")
+    pilot.add_argument("--hidden", type=_hidden_widths, default=(200, 200, 200))
+    pilot.add_argument("--activation", choices=["tanh", "relu", "silu"], default="tanh")
+    pilot.add_argument("--batch-size", type=int, default=64)
+    pilot.add_argument("--seed", type=int, default=2027)
+    pilot.add_argument("--checkpoint-selection", choices=["last", "best_validation"], default="last")
+    pilot.add_argument("--perturb-std-normalized", type=float, default=.1)
+    execution = pilot.add_mutually_exclusive_group()
+    execution.add_argument("--plan", action="store_true", help="Validate and print the plan without writing or training")
+    execution.add_argument("--resume", action="store_true", help="Verify and reuse completed stages; preserve interrupted attempts")
     evaluation = commands.add_parser("evaluate", help="Evaluate raw learned and optional decoder/OPF hybrid")
     evaluation.add_argument("dataset")
     evaluation.add_argument("model")
@@ -59,6 +98,8 @@ def main(argv=None):
     evaluation.add_argument("--split", default="iid_test")
     evaluation.add_argument("--decoder")
     evaluation.add_argument("--workers", type=int, default=1, help="Independent scenario processes (default: 1)")
+    evaluation.add_argument("--prediction-format", choices=["jsonl", "jsonl.gz"], default="jsonl")
+    evaluation.add_argument("--decoder-norm-sensitivity", action="store_true")
     view = commands.add_parser("plot-solution", help="Export a solved grid graph as standalone interactive HTML")
     view.add_argument("output", type=Path)
     view.add_argument("--benchmark", choices=BENCHMARKS, default="case30")
@@ -94,28 +135,45 @@ def main(argv=None):
         print(json.dumps(manifest["splits"], indent=2))
         return 0
     if args.command == "train":
-        from .ml import TrainConfig, train_model
-        weights = {"L0": 1.0} if args.method == "baseline" else {f"L{i}": 1.0 for i in range(6)}
+        from .ml import METHOD_WEIGHTS, TrainConfig, train_model
+        weights = dict(METHOD_WEIGHTS[args.method])
         if args.loss_weights:
             weights.update(json.loads(args.loss_weights))
-        values = {"hidden": tuple(int(h) for h in args.hidden.split(",")), "activation": args.activation,
-                  "epochs": args.epochs, "batch_size": args.batch_size, "seed": args.seed, "loss_weights": weights}
+        values = {"hidden": args.hidden, "activation": args.activation,
+                  "epochs": args.epochs, "batch_size": args.batch_size, "seed": args.seed, "loss_weights": weights,
+                  "learning_rate": args.learning_rate, "checkpoint_selection": args.checkpoint_selection}
         if args.config:
             values.update(json.loads(Path(args.config).read_text()))
-        report = train_model(args.dataset, args.output, TrainConfig(**values))
+        report = train_model(args.dataset, args.output, TrainConfig(**values), initialize_from=args.initialize_from)
         print(json.dumps({k: v for k, v in report.items() if k != "history"}, indent=2))
         return 0
     if args.command == "decoder":
         from .ml import train_decoder
-        report = train_decoder(args.dataset, args.model, args.output, epochs=args.epochs,
-                               batch_size=args.batch_size, hidden=args.hidden, quantile=args.quantile,
-                               units=args.error_units, seed=args.seed)
+        values = {"epochs": args.epochs, "batch_size": args.batch_size, "hidden": args.hidden,
+                  "quantile": args.quantile, "units": args.error_units, "seed": args.seed,
+                  "threshold": args.threshold, "learning_rate": args.learning_rate}
+        if args.config:
+            values.update(json.loads(Path(args.config).read_text()))
+        report = train_decoder(args.dataset, args.model, args.output, **values)
+        print(json.dumps(report, indent=2))
+        return 0
+    if args.command == "pilot":
+        from .pilot import PilotConfig, pilot_plan, run_pilot
+        config = PilotConfig(seed=args.seed, pretrain_epochs=args.pretrain_epochs,
+                             fine_tune_epochs=args.fine_tune_epochs, learning_rates=args.learning_rates,
+                             hidden=args.hidden, activation=args.activation, batch_size=args.batch_size,
+                             checkpoint_selection=args.checkpoint_selection,
+                             perturb_std_normalized=args.perturb_std_normalized)
+        report = (pilot_plan(args.dataset, config) if args.plan else
+                  run_pilot(args.dataset, args.output, config, resume=args.resume))
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "evaluate":
         from .experiments import evaluate_model
         report = evaluate_model(args.dataset, args.model, args.output, split=args.split,
-                                decoder_path=args.decoder, workers=args.workers)
+                                 decoder_path=args.decoder, workers=args.workers,
+                                 prediction_format=args.prediction_format,
+                                 decoder_norm_sensitivity=args.decoder_norm_sensitivity)
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "plot-solution":
@@ -138,7 +196,7 @@ def main(argv=None):
     if args.command == "calibrate":
         from .ml import recalibrate_decoder
         report = recalibrate_decoder(args.dataset, args.model, args.decoder, args.output,
-                                     quantile=args.quantile, units=args.error_units)
+                                      quantile=args.quantile, units=args.error_units, threshold=args.threshold)
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "infer":
