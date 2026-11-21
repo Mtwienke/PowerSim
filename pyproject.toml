@@ -12,6 +12,7 @@ dependencies = ["pandapower==3.5.6", "pandas>=2", "networkx>=3.6,<4", "streamlit
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 ml = ["torch>=2.6,<3"]
+report = ["torch>=2.6,<3", "matplotlib>=3.9,<4"]
 
 [project.scripts]
 powersim = "powersim.cli:main"

@@ -25,7 +25,7 @@ successful hybrid cases are entirely conventional OPF fallbacks.
 
 ## Reproducibility and scope
 
-- Run root: `artifacts/full-suite-seed2027-20261119T021858Z/`.
+- Archived run root: `artifacts/archive/full-suite-seed2027-20261119T021858Z/`.
 - Frozen code: `599ffd2917b38168688adf19334a3c1336f65c8a`.
 - Benchmarks: IEEE-30 (`case30`) and [Germany-30](germany30.md), DC physics.
 - Seed **2027** for generation, neural initialization/training, and decoder.

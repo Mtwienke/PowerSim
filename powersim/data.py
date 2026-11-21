@@ -1,5 +1,6 @@
 """Seeded headless scenarios, validated labels and leakage-safe dataset artifacts."""
 from dataclasses import asdict, dataclass, field
+import gzip
 from importlib.metadata import PackageNotFoundError, version
 import json
 from itertools import islice
@@ -62,6 +63,10 @@ class DatasetConfig:
     max_attempt_factor: int = 10
     placement_seed: int | None = None
     test_seed: int | None = None
+    demand_shift_mean_factor: float | None = None
+    preserve_fixed_injections: bool = False
+    training_sensitivities_only: bool = False
+    record_format: str = "jsonl"
 
     def __post_init__(self):
         if self.simulation.physics_mode != "dc":
@@ -83,6 +88,13 @@ class DatasetConfig:
             raise ValueError("sampling_policy must be attempts or valid")
         if isinstance(self.max_attempt_factor, bool) or not isinstance(self.max_attempt_factor, int) or self.max_attempt_factor < 1:
             raise ValueError("max_attempt_factor must be a positive integer")
+        if self.demand_shift_mean_factor is not None and (
+            not np.isfinite(self.demand_shift_mean_factor) or self.demand_shift_mean_factor <= 0
+            or self.demand_shift_mean_factor == self.load_mean_factor
+        ):
+            raise ValueError("Demand OOD mean must be positive and differ from the training mean")
+        if self.record_format not in ("jsonl", "jsonl.gz"):
+            raise ValueError("record_format must be jsonl or jsonl.gz")
         for seed in (self.seed, self.placement_seed, self.test_seed):
             if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
                 raise ValueError("Seeds must be nonnegative integers")
@@ -146,20 +158,21 @@ def installed_capacity(config, rate, nominal_demand_mw, conventional_pmax_mw, ex
     return capacity, actual_rate
 
 
-def _scenarios(config, split, count, rate, stream, nominal, sites, capacity_mw=None):
+def _scenarios(config, split, count, rate, stream, nominal, sites, capacity_mw=None, fixed_mw=0.):
     """Generate in the parent, so process count cannot change any RNG stream."""
     rng = np.random.default_rng(stream)
     renewable_config = config.renewable
     nwind = renewable_config.installation_pairs
     capacity = float(rate * nominal.sum()) if capacity_mw is None else float(capacity_mw)
+    load_mean = config.demand_shift_mean_factor if split == "ood_demand" else config.load_mean_factor
     for number in range(count):
-        gross = nominal * np.maximum(0, rng.normal(config.load_mean_factor, config.load_std_fraction, len(nominal)))
+        gross = nominal * np.maximum(0, rng.normal(load_mean, config.load_std_fraction, len(nominal)))
         wind = renewable_config.wind_scale * rng.weibull(renewable_config.wind_shape, nwind)
         irradiance = rng.beta(renewable_config.solar_alpha, renewable_config.solar_beta, nwind) * renewable_config.irradiance_reference_wm2
         renewable = np.concatenate([
             wind_capacity_factor(wind, renewable_config) * capacity * renewable_config.wind_capacity_fraction/nwind,
             solar_capacity_factor(irradiance, renewable_config) * capacity * (1-renewable_config.wind_capacity_fraction)/nwind])
-        loads = gross.copy()
+        loads = gross - fixed_mw
         loads[sites] -= renewable
         net_load = loads.tolist()
         yield {"scenario_id": digest({"split": split, "number": number, "seed": config.seed, "x": net_load}),
@@ -191,19 +204,10 @@ def _valid_results(scenarios, map_cases, target, cap, gens, relation):
         raise ValueError(f"Valid-label attempt cap exhausted: {accepted}/{target} valid in {attempted}/{cap} attempts")
 
 
-def generate_dataset(directory, config: DatasetConfig | None = None, *, workers=1):
-    config = config or DatasetConfig()
-    validate_workers(workers)
-    started = perf_counter()
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=False)
-    net = make_case(config.simulation)
-    pp.to_json(net, str(directory / "network.json"))
-    inputs = build_dispatch_inputs(net, config.simulation)
-    # The stochastic renewable regime replaces any nominal fixed injections.
+def scenario_design(config, net, inputs):
+    """Freeze the same case/split design for pilot feasibility and full labels."""
     nominal = np.asarray(nodal_power(net, "load"))
-    relation = dc_relation(net)
-    gens = inputs["generators"]
+    fixed_mw = np.asarray(nodal_power(net, "sgen")) if config.preserve_fixed_injections else 0.
     buses = [int(b.split(":")[1]) for b in inputs["context"].bus_ids]
     pq = [i for i, b in enumerate(buses) if b not in set(net.gen.bus) | set(net.ext_grid.bus)]
     if len(pq) < 2 * config.renewable.installation_pairs:
@@ -216,19 +220,44 @@ def generate_dataset(directory, config: DatasetConfig | None = None, *, workers=
               ("validation", config.validation_cases, config.penetration_rates[0])]
     splits += [("iid_test" if i == 0 else f"ood_test_{i}", config.test_cases, rate)
                for i, rate in enumerate(config.penetration_rates)]
+    regimes = [0, 0, *range(len(config.penetration_rates))]
+    if config.demand_shift_mean_factor is not None:
+        splits.append(("ood_demand", config.test_cases, config.penetration_rates[0]))
+        regimes.append(0)
     # Installation seed independent of ALL split RNG streams.
     split_seeds = np.random.SeedSequence([config.seed, 917]).spawn(len(splits))
     if config.test_seed is not None:
-        split_seeds[2:] = np.random.SeedSequence([config.test_seed, 917]).spawn(len(config.penetration_rates))
-    capacities = [installed_capacity(config, rate, float(nominal.sum()), sum(g.p_max_mw for g in gens),
-                  config.renewable_capacities_mw[i] if config.renewable_capacities_mw else None)
+        split_seeds[2:] = np.random.SeedSequence([config.test_seed, 917]).spawn(len(splits)-2)
+    pmax = sum(g.p_max_mw for g in inputs["generators"])
+    capacities = [installed_capacity(config, rate, float(nominal.sum()), pmax,
+                     config.renewable_capacities_mw[i] if config.renewable_capacities_mw else None)
                   for i, rate in enumerate(config.penetration_rates)]
+    return nominal, fixed_mw, sites, capacities, [(split, stream, capacities[i])
+                                                  for split, stream, i in zip(splits, split_seeds, regimes)]
+
+
+def generate_dataset(directory, config: DatasetConfig | None = None, *, workers=1):
+    config = config or DatasetConfig()
+    validate_workers(workers)
+    started = perf_counter()
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=False)
+    net = make_case(config.simulation)
+    pp.to_json(net, str(directory / "network.json"))
+    inputs = build_dispatch_inputs(net, config.simulation)
+    nominal, fixed_mw, sites, capacities, design = scenario_design(config, net, inputs)
+    relation = dc_relation(net)
+    gens = inputs["generators"]
+    buses = [int(b.split(":")[1]) for b in inputs["context"].bus_ids]
+    nwind = config.renewable.installation_pairs
     manifest = {
         "schema_version": "3.0", "configuration": asdict(config), "versions": package_versions(),
         "model_id": inputs["context"].network_fingerprint,
         "configuration_id": inputs["context"].configuration_id,
         "source_provenance": net.get("source_provenance"),
         "nominal_gross_load_mw": nominal.tolist(),
+        "retained_benchmark_fixed_injection_mw": np.broadcast_to(fixed_mw, nominal.shape).tolist(),
+        "record_format": config.record_format,
         "bus_ids": list(inputs["context"].bus_ids), "generator_ids": [g.asset_id for g in gens],
         "generators": [asdict(g) for g in gens], "branch_ids": relation.branch_ids,
         "installations": [{"bus_id": f"bus:{buses[int(site)]}", "kind": "wind" if i < nwind else "pv",
@@ -256,22 +285,24 @@ def generate_dataset(directory, config: DatasetConfig | None = None, *, workers=
     }
     arrays = {}
     with ordered_pool(workers, _init_reference_worker, (config.simulation,)) as map_cases:
-        for (split, count, rate), stream, (capacity, actual) in zip(
-                splits, split_seeds, [capacities[0], capacities[0], *capacities]):
+        for (split, count, rate), stream, (capacity, actual) in design:
             cap = count if config.sampling_policy == "attempts" else count*config.max_attempt_factor
-            scenarios = _scenarios(config, split, cap, rate, stream, nominal, sites, capacity)
+            scenarios = _scenarios(config, split, cap, rate, stream, nominal, sites, capacity, fixed_mw)
             results = (map_cases(_solve_scenario, scenarios) if config.sampling_policy == "attempts" else
                        _valid_results(scenarios, map_cases, count, cap, gens, relation))
             try:
                 stats = _write_split(directory, split, count, rate, stream, results,
-                                     arrays, nominal, gens, relation)
+                                      arrays, nominal, gens, relation,
+                                      compute_sensitivities=(split == "train" or not config.training_sensitivities_only),
+                                      record_format=config.record_format)
             except ValueError as exc:
                 write_json(directory / "generation_error.json", {"split": split, "diagnostic": str(exc),
                            "sampling_policy": config.sampling_policy, "attempt_cap": cap})
                 raise
             stats.update(target_valid_cases=count if config.sampling_policy == "valid" else None,
                          attempt_cap=cap, renewable_capacity_mw=capacity, actual_nameplate_fraction=actual,
-                         seed_entropy=stream.entropy)
+                          seed_entropy=stream.entropy, load_mean_factor=(
+                              config.demand_shift_mean_factor if split == "ood_demand" else config.load_mean_factor))
             manifest["splits"][split] = stats
     for name, values in (("x", arrays["train_x"]), ("y", arrays["train_y"])):
         arrays[f"{name}_mean"] = values.mean(axis=0)
@@ -288,30 +319,41 @@ def generate_dataset(directory, config: DatasetConfig | None = None, *, workers=
     return manifest
 
 
-def _write_split(directory, split, count, rate, stream, results, arrays, nominal, gens, relation):
+def split_record_file(directory, split, manifest):
+    return Path(directory) / f"{split}.{manifest.get('record_format', 'jsonl')}"
+
+
+def _write_split(directory, split, count, rate, stream, results, arrays, nominal, gens, relation, *,
+                 compute_sensitivities=True, record_format="jsonl"):
     x, y, lower, upper, active, flows, objectives, jacobians, jvalid, sample_ids = ([] for _ in range(10))
     failures = []
     attempted = 0
-    with (directory / f"{split}.jsonl").open("w") as records:
+    path = directory / f"{split}.{record_format}"
+    stream_out = gzip.open(path, "wt", compresslevel=3) if record_format == "jsonl.gz" else path.open("w")
+    with stream_out as records:
         for record, result in results:
             attempted += 1
             record["reference"] = result.to_dict()
             loads, scenario_id = record["net_load_mw"], record["scenario_id"]
             if valid_label(result, gens, relation.branch_ids):
-                j, condition = reference_jacobian([g.cost_quadratic for g in gens], relation,
-                    result.active_lower, result.active_upper, [b.active for b in result.branches],
-                    generation=np.asarray([result.generation_mw[g.asset_id] for g in gens]),
-                    cost_linear=np.asarray([g.marginal_cost_per_mwh for g in gens]),
-                    branch_flows=[b.p_from_mw for b in result.branches])
+                j, condition = None, float("nan")
+                if compute_sensitivities:
+                    j, condition = reference_jacobian([g.cost_quadratic for g in gens], relation,
+                        result.active_lower, result.active_upper, [b.active for b in result.branches],
+                        generation=np.asarray([result.generation_mw[g.asset_id] for g in gens]),
+                        cost_linear=np.asarray([g.marginal_cost_per_mwh for g in gens]),
+                        branch_flows=[b.p_from_mw for b in result.branches])
                 record["sensitivity"] = {"available": j is not None,
                                          "kkt_condition": condition if np.isfinite(condition) else None,
                                          "unavailable_reason": None if j is not None else
-                                         "Singular/ill-conditioned KKT or weakly active inequality"}
+                                         ("Singular/ill-conditioned KKT or weakly active inequality"
+                                          if compute_sensitivities else "Not requested for this split")}
                 x.append(loads); y.append([result.generation_mw[g.asset_id] for g in gens])
                 lower.append(result.active_lower); upper.append(result.active_upper)
                 active.append([b.active for b in result.branches])
                 flows.append([b.p_from_mw for b in result.branches]); objectives.append(result.objective)
-                jacobians.append(j if j is not None else np.zeros((len(gens), len(loads))))
+                if compute_sensitivities:
+                    jacobians.append(j if j is not None else np.zeros((len(gens), len(loads))))
                 jvalid.append(j is not None); sample_ids.append(scenario_id)
             else:
                 failures.append({"scenario_id": scenario_id, "status": result.status,
@@ -334,7 +376,7 @@ def _write_split(directory, split, count, rate, stream, results, arrays, nominal
             "active_generator_fraction": float(np.mean(np.asarray(lower) | np.asarray(upper))) if x else None,
             "active_branch_fraction": float(np.mean(active)) if x else None,
             "samples_with_active_branch": int(np.any(active, axis=1).sum()) if x else 0,
-            "sensitivity_available": int(sum(jvalid))}
+            "sensitivity_available": int(sum(jvalid)), "sensitivity_computed": compute_sensitivities}
 
 
 def valid_label(result, gens, branch_ids):
@@ -348,9 +390,9 @@ def valid_label(result, gens, branch_ids):
             and result.objective is not None and np.isfinite(result.objective))
 
 
-def load_dataset(directory):
+def load_dataset(directory, *, sensitivities=True):
     directory = Path(directory)
     manifest = json.loads((directory / "manifest.json").read_text())
     with np.load(directory / "dataset.npz", allow_pickle=False) as values:
-        arrays = {k: values[k] for k in values.files}
+        arrays = {k: values[k] for k in values.files if sensitivities or not k.endswith(("_jacobian", "_jacobian_valid"))}
     return manifest, arrays

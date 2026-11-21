@@ -116,6 +116,39 @@ but still trails M1 (**90.17%**) and paper M5 (**97.94%**). The published M5
 advantage remains unreproduced, and raw M5 strict feasibility is **0%**.
 The report separates decoder/fallback improvements and FGSM target conventions.
 
+## Rebuild the experimental evaluation report
+
+The report consolidates the completed historical suites, IEEE-30 pilot and
+source-informed reconstruction without retraining or changing their artifacts.
+Run from this checkout with those run directories under `artifacts/`:
+
+```sh
+python -m pip install -e '.[dev,report]'
+python -m powersim.report_evaluation --plan
+python -m powersim.report_evaluation --output artifacts/report_evaluation_recheck
+```
+
+The last command re-analyzes saved predictions and labels. Add `--benchmark-runtime`
+for repeated, matched CPU measurements with fresh solver and fallback calls. The
+current Germany-30 v2 reference-only validation is optional and separate from
+historical v1 learned-model results. See [report instructions](docs/report-evaluation.md)
+for commands, artifact keys and the limits on comparing with the paper.
+
+## Clean-slate multi-grid suite
+
+The [registered clean-slate suite](docs/clean-suite.md) covers IEEE-30, IEEE-57,
+IEEE-118, IEEE-300, PEGASE-1354 and Germany-30 v2, with fresh data and separate
+training seeds. The runner checks numerical references before starting each
+grid; an unsupported reference is recorded rather than silently modifying the
+grid or borrowing historical labels.
+
+```sh
+python -m powersim.clean_suite artifacts/clean-suite --workers 4 --plan
+python -m powersim.clean_suite artifacts/clean-suite --workers 4
+```
+
+Historical data, runs and the old report have moved to `artifacts/archive/`.
+
 ## What is implemented
 
 - Validated DC/AC configuration, immutable nodal policy inputs, actual polynomial

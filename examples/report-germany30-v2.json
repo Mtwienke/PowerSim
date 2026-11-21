@@ -1,0 +1,7 @@
+{
+  "seed": 2027,
+  "train_cases": 8,
+  "validation_cases": 4,
+  "test_cases": 200,
+  "sampling_policy": "attempts"
+}

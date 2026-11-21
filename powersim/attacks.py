@@ -51,7 +51,7 @@ def generate_fgsm_dataset(dataset, model_path, output, *, split="iid_test", epsi
     dataset, output = Path(dataset), Path(output)
     if output.exists() or output.resolve().is_relative_to(dataset.resolve()):
         raise ValueError("Attack output must be new and separate from the source dataset")
-    manifest, arrays = load_dataset(dataset)
+    manifest, arrays = load_dataset(dataset, sensitivities=False)
     if split in ("train", "validation") or split not in manifest["splits"]:
         raise ValueError("FGSM generation requires a held-out split")
     simulation_values = manifest["configuration"]["simulation"]
@@ -94,7 +94,9 @@ def generate_fgsm_dataset(dataset, model_path, output, *, split="iid_test", epsi
         stats = _write_split(output, attack_split, len(records), manifest["splits"][split]["nameplate_penetration"],
                              np.random.SeedSequence(0),
                              map_cases(_solve_scenario, records), attack_arrays,
-                             np.asarray(manifest["nominal_gross_load_mw"]), gens, relation)
+                              np.asarray(manifest["nominal_gross_load_mw"]), gens, relation,
+                              compute_sensitivities=not manifest["configuration"].get("training_sensitivities_only", False),
+                              record_format=manifest.get("record_format", "jsonl"))
     original_lookup = {record["scenario_id"]: i for i, record in enumerate(records)}
     valid_rows = [original_lookup[str(sid)] for sid in attack_arrays[f"{attack_split}_scenario_ids"]]
     attack_arrays[f"{attack_split}_original_y"] = original_y[valid_rows]

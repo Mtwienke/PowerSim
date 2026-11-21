@@ -284,7 +284,7 @@ def _summarize(root, entries):
     for entry in entries:
         r = entry["report"]
         rows.append({
-            **{k: entry[k] for k in ("profile", "method", "checkpoint", "split", "mode")},
+            **{k: entry[k] for k in ("benchmark", "seed", "profile", "method", "checkpoint", "split", "mode") if k in entry},
             "cases": r["labeled_cases"], "raw_generator_accuracy": r["raw_accuracy"]["generator_accuracy_lt_1mw"],
             "raw_joint_accuracy": r["raw_accuracy"]["joint_accuracy_lt_1mw"],
             "raw_mae_mw": r["raw_accuracy"]["mae_mw"], "raw_feasible_rate": r["raw_physics"]["feasible_rate"],

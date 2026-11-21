@@ -152,7 +152,7 @@ The pilot uses one existing DC dataset, leaving its operating assumptions
 unchanged. For example:
 
 ```sh
-DATASET=artifacts/full-suite-seed2027-20261119T021858Z/stages/germany30--dataset/attempt-001
+DATASET=artifacts/archive/full-suite-seed2027-20261119T021858Z/stages/germany30--dataset/attempt-001
 
 # Read-only: validates inputs and prints the plan; does not create OUTPUT.
 powersim pilot "$DATASET" artifacts/gao-pilot-germany2027 --plan

@@ -22,7 +22,8 @@ def tensor(value):
 
 
 def artifact_hash(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    with Path(path).open("rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
 
 
 def dataset_identity(manifest):
@@ -52,7 +53,7 @@ def training_data_hash(arrays):
             continue
         value = np.ascontiguousarray(arrays[name])
         checksum.update(f"{name}:{value.dtype}:{value.shape}".encode())
-        checksum.update(value.tobytes())
+        checksum.update(value.reshape(-1).view(np.uint8))
     return checksum.hexdigest()
 
 
@@ -113,7 +114,38 @@ def physical_jacobian(model, x, create_graph=True):
         x = x.detach().requires_grad_(True)
     y = model(x)
     return torch.stack([torch.autograd.grad(y[:, g].sum(), x, create_graph=create_graph,
-                        retain_graph=True)[0] for g in range(y.shape[1])], dim=1)
+                         retain_graph=True)[0] for g in range(y.shape[1])], dim=1)
+
+
+def chain_jacobian(model, x):
+    """Exact chain rule for the independent dense predictor; differentiable in weights."""
+    z = (x-model.x_mean)/model.x_scale
+    gates = []
+    for layer in model.layers:
+        pre = layer(z)
+        z = model.activation(pre)
+        if model.activation_name == "relu":
+            gate = (pre > 0).to(pre.dtype)
+        elif model.activation_name == "tanh":
+            gate = 1-z.square()
+        else:
+            s = pre.sigmoid()
+            gate = s*(1+pre*(1-s))
+        gates.append(gate)
+    jac = model.output.weight[None] * gates[-1][:, None, :]
+    for layer, gate in zip(reversed(model.layers[1:]), reversed(gates[:-1])):
+        jac = (jac @ layer.weight) * gate[:, None, :]
+    return (jac @ model.layers[0].weight)*model.y_scale[None, :, None]/model.x_scale
+
+
+def active_branch_loss(j, active, m_g, m_d, norm, reduction):
+    """Compute the same masked L4 without a batch × all branches × load tensor."""
+    cases, branches = torch.where(active)
+    if not len(cases):
+        return j.sum()*0
+    residual = torch.bmm(m_g[branches, None, :], j[cases]).squeeze(1)-m_d[branches]
+    size = residual.numel() if reduction == "active" else len(j)*len(m_g)*j.shape[-1]
+    return residual_loss(residual, norm).sum()/size
 
 
 def residual_loss(values, norm="mse"):
@@ -138,13 +170,14 @@ def masked_mean_square(values, mask):
 
 
 def jacobian_losses(j, reference_j, reference_valid, active_generator, active_branch, m_g, m_d,
-                    *, pattern_norm="mse", reduction="active"):
+                    *, pattern_norm="mse", reduction="active", sparse_branches=False):
     return {
         "L1": masked_residual_loss(j-reference_j, reference_valid, "mse", reduction),
         "L2": residual_loss(j.sum(dim=1)-1, pattern_norm).mean(),
         "L3": masked_residual_loss(j, active_generator, pattern_norm, reduction),
-        "L4": masked_residual_loss(torch.einsum("bg,ngd->nbd", m_g, j)-m_d, active_branch,
-                                   pattern_norm, reduction),
+        "L4": (active_branch_loss(j, active_branch, m_g, m_d, pattern_norm, reduction) if sparse_branches
+               else masked_residual_loss(torch.einsum("bg,ngd->nbd", m_g, j)-m_d, active_branch,
+                                         pattern_norm, reduction)),
     }
 
 
@@ -171,6 +204,8 @@ class TrainConfig:
     adam_variant: str = "pytorch"
     adam_epsilon: float = 1e-8
     learning_rate_decay: float = 0.
+    jacobian_mode: str = "autograd"
+    cpu_threads: int = 1
 
     def __post_init__(self):
         if (not all(isinstance(v, int) and v > 0 for v in (self.epochs, self.batch_size))
@@ -200,6 +235,8 @@ class TrainConfig:
             raise ValueError("Invalid power base or optimizer numerics")
         if len(set(self.branch_subset)) != len(self.branch_subset) or any(not isinstance(b, str) for b in self.branch_subset):
             raise ValueError("branch_subset must contain distinct branch IDs")
+        if self.jacobian_mode not in ("autograd", "chain") or type(self.cpu_threads) is not int or self.cpu_threads < 1:
+            raise ValueError("Unknown Jacobian mode or invalid CPU thread count")
 
 
 def initialize_layers(module, initializer):
@@ -246,7 +283,7 @@ def train_model(dataset, output, config: TrainConfig | None = None, *, initializ
     if set(training_input_ids) & set(validation_input_ids):
         raise ValueError("Training and validation contain duplicate nodal inputs")
     torch.manual_seed(config.seed)
-    torch.set_num_threads(1)
+    torch.set_num_threads(config.cpu_threads)
     torch.use_deterministic_algorithms(True)
     normalization = ([a["x_mean"], a["x_scale"], a["y_mean"], a["y_scale"]]
                      if config.normalization == "standard" else
@@ -320,6 +357,7 @@ def train_model(dataset, output, config: TrainConfig | None = None, *, initializ
     best_epoch = None
     updates = 0
     started = time.perf_counter()
+    compute_j = chain_jacobian if config.jacobian_mode == "chain" else physical_jacobian
     for epoch in range(config.epochs):
         model.train()
         totals = {f"L{i}": 0.0 for i in range(6)}
@@ -330,16 +368,18 @@ def train_model(dataset, output, config: TrainConfig | None = None, *, initializ
             prediction = model(bx)
             terms = {"L0": supervised_loss(prediction, y[indices], model, config)}
             if any(config.loss_weights.get(f"L{i}", 0) > 0 for i in range(1, 5)):
-                j = physical_jacobian(model, bx)
+                j = compute_j(model, bx)
                 terms.update(jacobian_losses(j, reference_j[indices], valid_j[indices],
                                              active_g[indices], active_b[indices], pattern_mg, pattern_md,
-                                             pattern_norm=config.pattern_norm, reduction=config.mask_reduction))
+                                              pattern_norm=config.pattern_norm, reduction=config.mask_reduction,
+                                              sparse_branches=config.jacobian_mode == "chain"))
             if config.loss_weights.get("L5", 0) > 0:
                 noise = torch.randn(bx.shape, generator=perturb_rng)
                 perturbed = (bx.detach()+noise*model.x_scale*config.perturb_std_normalized).requires_grad_(True)
-                jp = physical_jacobian(model, perturbed)
+                grad_sum = (torch.autograd.grad(model(perturbed).sum(), perturbed, create_graph=True)[0]
+                            if config.jacobian_mode == "chain" else physical_jacobian(model, perturbed).sum(dim=1))
                 # No local L3/L4 masks are extrapolated to unlabeled points.
-                terms["L5"] = residual_loss(jp.sum(dim=1)-1, config.pattern_norm).mean()
+                terms["L5"] = residual_loss(grad_sum-1, config.pattern_norm).mean()
             if config.loss_weights.get("branch_penalty", 0) > 0:
                 terms["branch_penalty"] = branch_flow_penalty(
                     prediction, bx, mg, md, tensor(a["branch_constant"]), tensor(a["branch_limits_mw"]))
@@ -513,25 +553,25 @@ def train_decoder(dataset, model_path, output, *, epochs=100, batch_size=64, hid
                    learning_rate=.001, quantile=.95, units="normalized", seed=2026, threshold=None,
                    activation="tanh", feature_layer="penultimate_hidden", initializer="pytorch",
                    adam_variant="pytorch", adam_epsilon=1e-8, learning_rate_decay=0.,
-                   checkpoint_selection="best_validation"):
+                  checkpoint_selection="best_validation", cpu_threads=1):
     if (min(epochs, batch_size) < 1 or not np.isfinite(learning_rate) or learning_rate <= 0
             or units not in RECONSTRUCTION_SCORES):
         raise ValueError("Invalid decoder settings")
     if (initializer not in ("pytorch", "glorot_uniform") or adam_variant not in ("pytorch", "keras_v2")
             or checkpoint_selection not in ("best_validation", "last")
             or not np.isfinite([adam_epsilon, learning_rate_decay]).all()
-            or adam_epsilon <= 0 or learning_rate_decay < 0):
+            or adam_epsilon <= 0 or learning_rate_decay < 0 or type(cpu_threads) is not int or cpu_threads < 1):
         raise ValueError("Invalid decoder numerical settings")
     # Validate before creating artifacts, including explicit fixed thresholds.
     _decoder_calibration([0.], units, quantile, threshold)
-    manifest, a = load_dataset(dataset)
+    manifest, a = load_dataset(dataset, sensitivities=False)
     model, checkpoint = load_model(model_path)
     if dataset_identity(manifest) != checkpoint["dataset_id"]:
         raise ValueError("Decoder must use the OPF model's training/validation dataset")
     if not len(a["validation_x"]):
         raise ValueError("Decoder calibration requires validation inputs")
     torch.manual_seed(seed)
-    torch.set_num_threads(1)
+    torch.set_num_threads(cpu_threads)
     torch.use_deterministic_algorithms(True)
     for p in model.parameters():
         p.requires_grad_(False)
@@ -573,7 +613,7 @@ def train_decoder(dataset, model_path, output, *, epochs=100, batch_size=64, hid
         errors = reconstruction_errors(model, decoder, val_x, units).numpy()
     metadata = {"hidden": decoder.hidden[0] if len(decoder.hidden) == 1 else list(decoder.hidden),
                  "hidden_layers": list(decoder.hidden), "epochs": epochs, "batch_size": batch_size,
-                  "learning_rate": learning_rate, "seed": seed,
+                 "learning_rate": learning_rate, "seed": seed, "cpu_threads": cpu_threads,
                   "activation": activation, "initializer": initializer, "adam_variant": adam_variant,
                   "adam_epsilon": adam_epsilon, "learning_rate_decay": learning_rate_decay,
                   "checkpoint_selection": checkpoint_selection, "selected_epoch": selected_epoch,
@@ -618,7 +658,7 @@ def load_decoder(path, model_path, model):
 
 def recalibrate_decoder(dataset, model_path, decoder_path, output, *, quantile=.95, units=None, threshold=None):
     """Explicit threshold-only operation; never fit on test or production data."""
-    manifest, arrays = load_dataset(dataset)
+    manifest, arrays = load_dataset(dataset, sensitivities=False)
     model, checkpoint = load_model(model_path)
     decoder, metadata = load_decoder(decoder_path, model_path, model)
     if dataset_identity(manifest) != checkpoint["dataset_id"]:

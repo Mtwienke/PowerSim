@@ -11,7 +11,7 @@ its raw predictions did not meet the configured feasibility checks.**
 
 ## Provenance and settings
 
-- Run: `artifacts/full-suite-20261118T044204Z/` (ignored experiment artifacts).
+- Archived run: `artifacts/archive/full-suite-20261118T044204Z/` (ignored experiment artifacts).
 - Archived source: commit `c98947a3724d6dcd5974889d4605c233e324d35c`.
 - IEEE 30, DC, bundled polynomial costs, branch limits scaled to 90%.
 - Data/training/decoder seed: 2026; separate training/validation/IID/OOD streams.

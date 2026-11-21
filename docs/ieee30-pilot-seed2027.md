@@ -21,10 +21,10 @@ Poor fitting already occurs on training and IID validation data.
 ## Frozen comparison protocol
 
 - Existing IEEE-30 dataset:
-  `artifacts/full-suite-seed2027-20261119T021858Z/stages/case30--dataset/attempt-001/`.
+  `artifacts/archive/full-suite-seed2027-20261119T021858Z/stages/case30--dataset/attempt-001/`.
   All eight recorded dataset output hashes verified before launch.
 - New run:
-  `artifacts/gao-pilot-ieee30-seed2027-20261119T064744Z/`.
+  `artifacts/archive/gao-pilot-ieee30-seed2027-20261119T064744Z/`.
 - Seed 2027; DC OPF; unchanged 0.9 branch-rating scale, renewable placements,
   sampling, feasible-label filtering and training-only normalization.
 - 9,425 valid training cases, 929 validation, 1,888/1,881/1,885 test cases.

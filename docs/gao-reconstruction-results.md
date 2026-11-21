@@ -19,7 +19,7 @@ occurred.** Historical datasets, checkpoints and negative reports are retained.
 
 ## Execution and provenance
 
-- Run root: `artifacts/gao-reconstruction-full-20261119T133302Z/`.
+- Archived run root: `artifacts/archive/gao-reconstruction-full-20261119T133302Z/`.
 - Frozen source: **`e83e0852af414b4b3aa4f2d5357c218d155f8d0a`**.
 - Pinned public examples: `e775ce3a24af0408aed9c02236abd862707cbae0`.
 - Start **13:33:59 UTC**, finish **14:43:03 UTC**, 2026-11-19;
@@ -319,7 +319,7 @@ To verify and independently regenerate descriptive analysis using the original
 source, choose a **new** output directory (the analyzer refuses overwrites):
 
 ```sh
-RUN=artifacts/gao-reconstruction-full-20261119T133302Z
+RUN=artifacts/archive/gao-reconstruction-full-20261119T133302Z
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
   PYTHONPATH="$RUN/source" .venv/bin/python -B -m powersim.reproduction_analysis \
   "$RUN" --output "$RUN/analysis-recheck"

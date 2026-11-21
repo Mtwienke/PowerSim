@@ -108,7 +108,7 @@ def evaluate_model(dataset, model_path, output, *, split="iid_test", decoder_pat
     validate_workers(workers)
     if prediction_format not in ("jsonl", "jsonl.gz"):
         raise ValueError("prediction_format must be jsonl or jsonl.gz")
-    manifest, a = load_dataset(dataset)
+    manifest, a = load_dataset(dataset, sensitivities=False)
     if split not in manifest["splits"] or split in ("train", "validation"):
         raise ValueError("Evaluation requires a held-out IID/OOD test split")
     model, checkpoint = load_model(model_path)

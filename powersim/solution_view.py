@@ -1,5 +1,6 @@
 """Render a solved scenario from its stable bus/source/branch IDs, not map proximity."""
 from html import escape
+import gzip
 import json
 import math
 from pathlib import Path
@@ -218,11 +219,14 @@ def solution_figure(net, result, *, demand=None, renewables=None, label=None):
 def dataset_solution(dataset, split, sample):
     """Read one originally attempted sample and its recorded reference; no re-solve."""
     import pandapower as pp
+    from .data import split_record_file
     directory = Path(dataset)
     manifest = json.loads((directory / "manifest.json").read_text())
     if split not in manifest["splits"] or sample < 0:
         raise ValueError("Unknown split or negative sample number")
-    with (directory / f"{split}.jsonl").open() as records:
+    path = split_record_file(directory, split, manifest)
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt") as records:
         for line in records:
             record = json.loads(line)
             if record["number"] == sample:

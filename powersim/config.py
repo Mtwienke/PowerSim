@@ -4,8 +4,8 @@ from typing import Literal
 
 PhysicsMode = Literal["dc", "ac"]
 SolutionMethod = Literal["numerical", "heuristic", "learned"]
-Benchmark = Literal["case30", "case14", "germany30"]
-BENCHMARKS = ("case30", "case14", "germany30")
+Benchmark = Literal["case30", "case14", "germany30", "case57", "case118", "case300", "case1354pegase"]
+BENCHMARKS = ("case30", "case14", "germany30", "case57", "case118", "case300", "case1354pegase")
 
 
 @dataclass(frozen=True)

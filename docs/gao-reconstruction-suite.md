@@ -202,7 +202,7 @@ path also passed against those real artifacts. Startup contention with the
 regression tests makes its runtime unsuitable for a full-run estimate.
 
 Full-budget run root reserved after these checks (prelaunch record):
-`artifacts/gao-reconstruction-full-20261119T133302Z/`.
+`artifacts/archive/gao-reconstruction-full-20261119T133302Z/`.
 The driver recorded its exact frozen commit and full-budget configuration in
 `suite_manifest.json`. Prelaunch free disk: **20.1 GiB**, with a 5 GiB stop reserve.
 No numerical setting or threshold was selected from smoke accuracy.
