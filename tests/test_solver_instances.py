@@ -6,6 +6,7 @@ import pytest
 
 from powersim.config import SimulationConfig
 from powersim.contracts import DispatchDecision, DispatchFailure
+from powersim.network import make_case
 from powersim.problem import OPFInstance
 from powersim.solver import solve_reference
 
@@ -80,3 +81,20 @@ def test_custom_solver_errors_and_infeasible_dispatch(instance):
     mismatch = solve_reference(instance, wrong_config)
     assert mismatch.status == "failed"
     assert "Configuration must match" in mismatch.diagnostics[0]
+
+
+def test_ac_solver_voltage_targets_are_audited():
+    config = SimulationConfig("ac", "case14")
+    instance = OPFInstance(make_case(config), config)
+    reference = solve_reference(instance)
+    assert reference.status == "ok", reference.diagnostics
+
+    def dispatch(case):
+        targets = {g.asset_id: reference.bus_voltage_pu[g.bus_id] for g in case.generators}
+        return DispatchDecision(active_power_mw=reference.generation_mw, voltage_targets_pu=targets)
+
+    result = solve_reference(instance, solver=dispatch)
+    assert result.status == "ok", result.diagnostics
+    assert result.bus_voltage_pu == pytest.approx(reference.bus_voltage_pu)
+    assert result.reactive_generation_mvar == pytest.approx(reference.reactive_generation_mvar, abs=1e-4)
+    assert not result.metrics["balance_applicable"]

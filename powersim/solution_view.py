@@ -1,9 +1,7 @@
 """Render a solved scenario from its stable bus/source/branch IDs, not map proximity."""
 from html import escape
-import gzip
 import json
 import math
-from pathlib import Path
 
 import networkx as nx
 import plotly.graph_objects as go
@@ -218,24 +216,9 @@ def solution_figure(net, result, *, demand=None, renewables=None, label=None):
 
 def dataset_solution(dataset, split, sample):
     """Read one originally attempted sample and its recorded reference; no re-solve."""
-    import pandapower as pp
-    from .data import split_record_file
-    directory = Path(dataset)
-    manifest = json.loads((directory / "manifest.json").read_text())
-    if split not in manifest["splits"] or sample < 0:
-        raise ValueError("Unknown split or negative sample number")
-    path = split_record_file(directory, split, manifest)
-    opener = gzip.open if path.suffix == ".gz" else open
-    with opener(path, "rt") as records:
-        for line in records:
-            record = json.loads(line)
-            if record["number"] == sample:
-                break
-        else:
-            raise ValueError(f"Sample {sample} not found in {split}")
-    net = pp.from_json(str(directory / "network.json"))
-    if network_fingerprint(net) != manifest["model_id"]:
-        raise ValueError("Saved source network does not match dataset identity")
+    from .data import load_dataset_attempt
+
+    net, manifest, record = load_dataset_attempt(dataset, split, sample)
     bus_ids = manifest["bus_ids"]
     demand = record["gross_load_mw"]
     renewable = [0.] * len(bus_ids)

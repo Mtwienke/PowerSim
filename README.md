@@ -205,6 +205,51 @@ or replays a saved dataset reference without re-solving it:
 powersim plot-solution artifacts/sample.html --dataset artifacts/germany-data --split train --sample 0
 ```
 
+## Add an OPF solver
+
+Define a solver as a callable that accepts an `OPFInstance` and returns a
+`DispatchDecision` with an active power setpoint in MW for every generator ID,
+including the external grid. For AC, also return any optimized generator voltage
+targets in per unit. Return `DispatchFailure` if the algorithm cannot produce a
+dispatch.
+
+```python
+from powersim.data import load_dataset_instance
+from powersim.solver import solve_reference
+from my_solver import dispatch
+
+instance = load_dataset_instance("artifacts/data", split="iid_test", sample=0)
+builtin = solve_reference(instance)
+alternative = solve_reference(instance, solver=dispatch)
+print(alternative.to_dict())
+```
+
+Create a new instance with `OPFInstance(net, config)` from `powersim.problem`.
+An instance snapshots the grid and load inputs. It exposes the ordered bus IDs
+in `instance.context.bus_ids`, ordered `net_load_mw`, and `generators` with
+bounds and polynomial costs. Use `instance.copy_network()` for topology, reactive
+loads, or mutable scratch work. For DC, `dc_relation(instance.copy_network())`
+from `powersim.dc` provides branch MW limits (`None` means unrated) and the
+linear model: `flows = m_g @ generation - m_d @ net_load + constant`. Balance
+requires `sum(generation) = sum(net_load) + balance_constant_mw`.
+
+On the command line, pass the callable as `MODULE:CALLABLE`:
+
+```sh
+powersim reference --benchmark case14 --solver my_solver:dispatch
+powersim reference --dataset artifacts/data --split iid_test --sample 0 --solver my_solver:dispatch
+```
+
+Saved samples are addressed by their original attempt number, including failed
+attempts. The reference command uses the saved network and configuration.
+`solve_reference` returns the standard `SolveResult` for either backend, so
+results can be compared by instance IDs and used with `solution_figure`.
+PowerSim audits alternative setpoints with power flow and marks converged
+dispatches that fail feasibility checks as `invalid`. For AC, reactive power
+and losses come from the power-flow audit. Include those losses in your active
+power schedule: slack corrections above `0.0001 MW` fail the audit. The audit
+checks feasibility; it does not certify optimality.
+
 ## Protocol, configuration and limitations
 
 See [docs/research.md](docs/research.md) for loss equations, normalization,

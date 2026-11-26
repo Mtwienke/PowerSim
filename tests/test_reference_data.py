@@ -6,7 +6,8 @@ import pytest
 
 from powersim.config import SimulationConfig
 from powersim.contracts import DispatchDecision
-from powersim.data import DatasetConfig, RenewableConfig, generate_dataset, load_dataset, valid_label, wind_capacity_factor
+from powersim.data import (DatasetConfig, RenewableConfig, generate_dataset, load_dataset, load_dataset_instance,
+                           valid_label, wind_capacity_factor)
 from powersim.dc import dc_relation, reference_jacobian
 from powersim.network import apply_nodal_loads, build_dispatch_inputs, make_case, network_fingerprint, nodal_loads, observation
 from powersim.solver import evaluate_decision, solve_reference
@@ -198,6 +199,8 @@ def test_failed_samples_are_preserved_but_not_training_labels(tmp_path, monkeypa
     assert manifest["splits"]["train"]["failures"][0]["diagnostics"] == ("controlled failure",)
     _, a = load_dataset(path)
     assert records[0]["scenario_id"] not in a["train_scenario_ids"]
+    recovered = load_dataset_instance(path, "train", 0)
+    assert recovered.net_load_mw == pytest.approx(records[0]["net_load_mw"])
 
 
 def test_kkt_sensitivity_matches_finite_differences():

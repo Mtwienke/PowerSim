@@ -13,7 +13,9 @@ import pandapower as pp
 
 from .config import SimulationConfig
 from .dc import dc_relation, reference_jacobian
-from .network import NodalLoadWriter, build_dispatch_inputs, digest, make_case, nodal_power
+from .network import (NodalLoadWriter, apply_nodal_loads, build_dispatch_inputs, digest, make_case,
+                      network_fingerprint, nodal_power)
+from .problem import OPFInstance
 from .solver import solve_reference
 from .workers import ordered_pool, validate_workers
 
@@ -321,6 +323,35 @@ def generate_dataset(directory, config: DatasetConfig | None = None, *, workers=
 
 def split_record_file(directory, split, manifest):
     return Path(directory) / f"{split}.{manifest.get('record_format', 'jsonl')}"
+
+
+def load_dataset_attempt(directory, split, sample):
+    """Read a saved network and one original attempt, including failed references."""
+    directory = Path(directory)
+    manifest = json.loads((directory / "manifest.json").read_text())
+    if split not in manifest["splits"] or sample < 0:
+        raise ValueError("Unknown split or negative sample number")
+    path = split_record_file(directory, split, manifest)
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as records:
+        for line in records:
+            record = json.loads(line)
+            if record["number"] == sample:
+                break
+        else:
+            raise ValueError(f"Sample {sample} not found in {split}")
+    net = pp.from_json(str(directory / "network.json"))
+    if network_fingerprint(net) != manifest["model_id"]:
+        raise ValueError("Saved source network does not match dataset identity")
+    return net, manifest, record
+
+
+def load_dataset_instance(directory, split="iid_test", sample=0) -> OPFInstance:
+    """Recreate the exact nodal inputs presented to the original solver."""
+    net, manifest, record = load_dataset_attempt(directory, split, sample)
+    config = SimulationConfig(**manifest["configuration"]["simulation"])
+    apply_nodal_loads(net, record["net_load_mw"])
+    return OPFInstance(net, config)
 
 
 def _write_split(directory, split, count, rate, stream, results, arrays, nominal, gens, relation, *,

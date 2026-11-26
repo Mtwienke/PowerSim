@@ -1,10 +1,11 @@
 """Headless research commands. ML imports are intentionally lazy."""
 import argparse
+from importlib import import_module
 import json
 from pathlib import Path
 
 from .config import BENCHMARKS, SimulationConfig
-from .data import DatasetConfig, generate_dataset
+from .data import DatasetConfig, generate_dataset, load_dataset_instance
 from .network import make_case
 from .solver import solve_reference
 
@@ -26,13 +27,31 @@ def _learning_rates(value):
         raise argparse.ArgumentTypeError("Use comma-separated learning rates") from exc
 
 
+def _solver_callable(value):
+    module, _, name = value.partition(":")
+    if not module or not name:
+        raise argparse.ArgumentTypeError("Use MODULE:CALLABLE for an alternative solver")
+    try:
+        solver = getattr(import_module(module), name)
+    except (ImportError, AttributeError) as exc:
+        raise argparse.ArgumentTypeError(f"Cannot import solver {value!r}: {exc}") from exc
+    if not callable(solver):
+        raise argparse.ArgumentTypeError(f"Solver {value!r} must be callable")
+    return solver
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="powersim")
     commands = parser.add_subparsers(dest="command", required=True)
     solve = commands.add_parser("reference", help="Solve and validate numerical OPF")
-    solve.add_argument("--physics", choices=["dc", "ac"], default="dc")
-    solve.add_argument("--benchmark", choices=BENCHMARKS, default="case30")
-    solve.add_argument("--branch-limit-scale", type=float, default=1.)
+    solve.add_argument("--physics", choices=["dc", "ac"], help="Physics for a bundled case (default: dc)")
+    solve.add_argument("--benchmark", choices=BENCHMARKS, help="Bundled case (default: case30)")
+    solve.add_argument("--branch-limit-scale", type=float, help="Branch limit multiplier (default: 1)")
+    solve.add_argument("--solver", type=_solver_callable, metavar="MODULE:CALLABLE",
+                       help="Alternative OPF dispatch solver (default: pandapower)")
+    solve.add_argument("--dataset", type=Path, help="Solve a saved attempt using the dataset's network/configuration")
+    solve.add_argument("--split", help="Saved split (default: iid_test)")
+    solve.add_argument("--sample", type=int, help="Original zero-based attempt number (default: 0)")
     data = commands.add_parser("dataset", help="Generate seeded DC-OPF labels")
     data.add_argument("directory")
     data.add_argument("--preset", choices=["smoke", "paper"], default="smoke")
@@ -116,8 +135,19 @@ def main(argv=None):
     infer.add_argument("--production-log", required=True)
     args = parser.parse_args(argv)
     if args.command == "reference":
-        config = SimulationConfig(args.physics, args.benchmark, branch_limit_scale=args.branch_limit_scale)
-        result = solve_reference(make_case(config), config)
+        choices = {"physics_mode": args.physics, "benchmark": args.benchmark,
+                   "branch_limit_scale": args.branch_limit_scale}
+        overrides = {name: value for name, value in choices.items() if value is not None}
+        if args.dataset is not None:
+            if overrides:
+                parser.error("--dataset uses its saved physics, benchmark and branch limits")
+            instance = load_dataset_instance(args.dataset, args.split or "iid_test", args.sample or 0)
+            result = solve_reference(instance, solver=args.solver)
+        else:
+            if args.split is not None or args.sample is not None:
+                parser.error("--split and --sample require --dataset")
+            config = SimulationConfig(**overrides)
+            result = solve_reference(make_case(config), config, solver=args.solver)
         print(json.dumps(result.to_dict(), indent=2, allow_nan=False))
         return 0 if result.status == "ok" else 1
     if args.command == "dataset":
