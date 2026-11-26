@@ -1,5 +1,5 @@
 """OPF labels and independent PF evaluation. No optimizer is called by evaluate_decision."""
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import math
 import time
 from typing import Literal
@@ -10,8 +10,10 @@ from pandapower.pypower.idx_brch import PF, PT, RATE_A
 from pandapower.pypower.idx_bus import GS
 
 from .config import SimulationConfig
-from .contracts import DispatchDecision
+from .contracts import DispatchDecision, DispatchFailure
+from .dc import dc_branch_limit_mw
 from .network import build_dispatch_inputs, digest, nodal_loads, ordered_buses
+from .problem import OPFInstance, OPFSolver
 
 # All active masks are local, tolerance-based, and aligned to explicit IDs.
 BOUND_TOL_MW = 1e-3
@@ -90,14 +92,13 @@ def _branches(net, dc: bool) -> tuple[BranchResult, ...]:
             branch = net._ppc["branch"][start + offset]
             limit_percent = float(row.get("max_loading_percent", 100))
             limit_percent = 100.0 if not math.isfinite(limit_percent) else limit_percent
-            rating = float(branch[RATE_A])
-            limit = rating if 0 < rating < 1e8 else None
+            limit = dc_branch_limit_mw(float(branch[RATE_A])) if dc else None
             p_from, p_to = float(branch[PF]), float(branch[PT])
             # DC limits are RATE_A in MW, NOT AC current loading at an assumed voltage.
             loading = (abs(p_from) / limit * limit_percent if limit else 0.0) if dc else float(result.loading_percent)
             active = bool(limit and abs(abs(p_from) - limit) <= BOUND_TOL_MW) if dc else abs(loading-limit_percent) <= LOADING_TOL_PERCENT
             violated = bool(limit and abs(p_from) > limit + BOUND_TOL_MW) if dc else loading > limit_percent + LOADING_TOL_PERCENT
-            output.append(BranchResult(f"{kind}:{index}", p_from, p_to, limit if dc else None,
+            output.append(BranchResult(f"{kind}:{index}", p_from, p_to, limit,
                                        loading, limit_percent, active, violated))
     return tuple(output)
 
@@ -171,18 +172,43 @@ def _collect(net, config, operation, elapsed, inputs, proposed=None) -> SolveRes
     )
 
 
-def solve_reference(net, config: SimulationConfig | None = None) -> SolveResult:
-    config = config or SimulationConfig()
+def solve_reference(net: pp.pandapowerNet | OPFInstance, config: SimulationConfig | None = None, *,
+                    solver: OPFSolver | None = None) -> SolveResult:
+    """Solve an instance with pandapower or audit an alternative solver's dispatch.
+
+    An instance supplies its own configuration and is never changed. Passing a
+    raw network to the default solver retains pandapower's in-place results.
+    """
     started = time.perf_counter()
+    instance = net if isinstance(net, OPFInstance) else None
+    config = config or (instance.config if instance is not None else SimulationConfig())
     try:
-        inputs = build_dispatch_inputs(net, config)  # fail early on unsupported contracts
-        (pp.rundcopp if config.physics_mode == "dc" else pp.runopp)(net, numba=False)
-        if not net.OPF_converged:
-            raise ValueError("OPF did not converge")
-        result = _collect(net, config, "opf", time.perf_counter()-started, inputs)
-        if not result.metrics["feasible"]:
-            return SolveResult(**{**result.__dict__, "status": "invalid",
-                                  "diagnostics": ("Converged OPF failed independent label validation",)})
+        if instance is not None and config != instance.config:
+            raise ValueError("Configuration must match the OPF instance")
+        if solver is None:
+            if instance is not None:
+                net = instance.copy_network()
+            inputs = build_dispatch_inputs(net, config)
+            (pp.rundcopp if config.physics_mode == "dc" else pp.runopp)(net, numba=False)
+            if not net.OPF_converged:
+                raise ValueError("OPF did not converge")
+            result = _collect(net, config, "opf", time.perf_counter()-started, inputs)
+        else:
+            instance = instance if instance is not None else OPFInstance(net, config)
+            decision = solver(instance)
+            if isinstance(decision, DispatchFailure):
+                return SolveResult("failed", False, config.physics_mode, "opf", time.perf_counter()-started,
+                                   (f"{decision.status}: {decision.diagnostic}",))
+            if not isinstance(decision, DispatchDecision):
+                raise TypeError("Solver must return DispatchDecision or DispatchFailure")
+            if not all(isinstance(note, str) for note in decision.diagnostics):
+                raise TypeError("Solver diagnostics must be strings")
+            audit = evaluate_decision(instance.copy_network(), decision, config)
+            result = replace(audit, operation="opf", solver_seconds=time.perf_counter()-started,
+                             diagnostics=(*audit.diagnostics, *decision.diagnostics))
+        if result.status == "ok" and not result.metrics["feasible"]:
+            return replace(result, status="invalid",
+                           diagnostics=("Converged OPF failed independent label validation", *result.diagnostics))
         return result
     except Exception as exc:
         return SolveResult("failed", False, config.physics_mode, "opf", time.perf_counter()-started,

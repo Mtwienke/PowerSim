@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandapower as pp
 from pandapower.pypower.makeBdc import makeBdc
+from pandapower.pypower.idx_brch import RATE_A
 from pandapower.pypower.idx_bus import GS, BUS_TYPE, REF
 
 from .network import generators, ordered_buses
@@ -16,10 +17,15 @@ class DCRelation:
     constant: np.ndarray
     branch_ids: tuple[str, ...]
     balance_constant_mw: float
+    branch_limits_mw: tuple[float | None, ...] = ()
+
+
+def dc_branch_limit_mw(rating: float) -> float | None:
+    return rating if 0 < rating < 1e8 else None
 
 
 def dc_relation(net) -> DCRelation:
-    """Use pandapower's taps/phase shifts, same bus/source/branch order as DTOs."""
+    """Compile DC flows and limits in the dispatch contract's bus/source/branch order."""
     pp.rundcpp(net, numba=False)
     ppc = net._ppc
     buses = ordered_buses(net)
@@ -42,7 +48,8 @@ def dc_relation(net) -> DCRelation:
     branch_ids = tuple(f"{kind}:{i}" for kind in ("line", "trafo") for i, r in net[kind].iterrows() if r.in_service)
     if len(branch_ids) != len(h):
         raise ValueError("Unsupported DC branch topology")
-    return DCRelation(h @ cgen, h[:, indices], constant, branch_ids, float(gs.sum()))
+    limits = tuple(dc_branch_limit_mw(float(rating)) for rating in ppc["branch"][:, RATE_A].real)
+    return DCRelation(h @ cgen, h[:, indices], constant, branch_ids, float(gs.sum()), limits)
 
 
 def reference_jacobian(cost_quadratic, relation, active_lower, active_upper,

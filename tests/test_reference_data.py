@@ -137,6 +137,8 @@ def test_dc_transformer_limits_and_relation():
     np.testing.assert_allclose(relation.m_g @ p-relation.m_d @ nodal_loads(net)+relation.constant,
                                [b.p_from_mw for b in r.branches], atol=1e-6)
     assert all(b.limit_percent == 80 for b in r.branches)
+    assert relation.branch_ids == tuple(b.asset_id for b in r.branches)
+    assert relation.branch_limits_mw == tuple(b.limit_mw for b in r.branches)
 
 
 def test_transformer_pf_violation_respects_configured_limit():
