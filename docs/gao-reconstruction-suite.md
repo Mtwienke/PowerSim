@@ -168,10 +168,10 @@ fixed-target/re-solved-target FGSM metrics and compressed prediction details.
 Historical defaults and saved models remain compatible.
 
 ```sh
-python -m powersim.reproduction artifacts/gao-reconstruction --plan
-python -m powersim.reproduction artifacts/gao-reconstruction
+python -m powersim.research.reproduction artifacts/gao-reconstruction --plan
+python -m powersim.research.reproduction artifacts/gao-reconstruction
 # After the full driver has completed:
-python -m powersim.reproduction_analysis artifacts/gao-reconstruction
+python -m powersim.research.reproduction_analysis artifacts/gao-reconstruction
 ```
 
 The runner freezes committed source and records every stage's input/output

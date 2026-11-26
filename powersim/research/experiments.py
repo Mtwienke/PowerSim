@@ -8,15 +8,17 @@ import time
 import numpy as np
 import torch
 
-from .config import SimulationConfig
-from .contracts import DispatchDecision
-from .data import load_dataset, package_versions, write_json
-from .hybrid import HybridPredictor
-from .metrics import ACCURACY_DEFINITIONS, accuracy, selection_curve
-from .ml import artifact_hash, calibrate_threshold, load_decoder, load_model, reconstruction_errors, tensor
-from .network import NodalLoadWriter, build_dispatch_inputs, digest, make_case
-from .solver import evaluate_decision, solve_reference
-from .workers import ordered_pool, validate_workers
+from ..core.config import SimulationConfig
+from ..core.contracts import DispatchDecision
+from ..core.power_flow import evaluate_decision
+from ..core.solve import solve_reference
+from ..core.workers import ordered_pool, validate_workers
+from ..instance_generation.data import load_dataset, package_versions, write_json
+from ..instance_generation.network import NodalLoadWriter, build_dispatch_inputs, digest, make_case
+from ..output_generation.metrics import ACCURACY_DEFINITIONS, accuracy, selection_curve
+from ..solvers.gao_double_neural.hybrid import HybridPredictor
+from ..solvers.gao_double_neural.ml import (artifact_hash, calibrate_threshold, load_decoder, load_model,
+                                           reconstruction_errors, tensor)
 
 
 def _physical_summary(evaluations, reference_objectives):

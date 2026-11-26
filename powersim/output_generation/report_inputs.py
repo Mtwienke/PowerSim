@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 import pandapower as pp
 
-from .data import split_record_file
-from .dc import dc_relation
-from .network import generators, network_fingerprint
+from ..core.dc import dc_relation
+from ..instance_generation.data import split_record_file
+from ..instance_generation.network import generators, network_fingerprint
 from .report_metrics import BOUND_MW, Physics
 
 
@@ -334,7 +334,8 @@ def split_arrays(dataset, name):
 def load_gate(model_path, decoder_path, dataset):
     """Use recorded validation grids, reconstructing only legacy validation scores."""
     import torch
-    from .ml import RECONSTRUCTION_SCORES, calibrate_threshold, load_decoder, load_model, reconstruction_errors, tensor
+    from ..solvers.gao_double_neural.ml import (RECONSTRUCTION_SCORES, calibrate_threshold, load_decoder,
+                                               load_model, reconstruction_errors, tensor)
 
     torch.set_num_threads(1)
     model, metadata = load_model(model_path)

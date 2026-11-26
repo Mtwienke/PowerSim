@@ -11,13 +11,13 @@ torch = pytest.importorskip("torch")
 
 from powersim.cli import main
 from powersim.data import DatasetConfig, generate_dataset, load_dataset
-from powersim.experiments import evaluate_model
-from powersim.ml import (
+from powersim.output_generation.metrics import accuracy
+from powersim.research.experiments import evaluate_model
+from powersim.research.pilot import PilotConfig, pilot_plan, run_pilot
+from powersim.solvers.gao_double_neural.ml import (
     Decoder, METHOD_WEIGHTS, TrainConfig, artifact_hash, load_decoder, load_model,
     reconstruction_errors, state_dict_hash, tensor, train_decoder, train_model, training_data_hash,
 )
-from powersim.metrics import accuracy
-from powersim.pilot import PilotConfig, pilot_plan, run_pilot
 
 
 @pytest.fixture(scope="module")
@@ -218,7 +218,7 @@ def test_pilot_shared_initializer_resume_and_integrity(dataset, tmp_path, monkey
     def forbidden(*args, **kwargs):
         raise AssertionError("Completed stages must not retrain")
 
-    monkeypatch.setattr("powersim.pilot.train_model", forbidden)
+    monkeypatch.setattr("powersim.research.pilot.train_model", forbidden)
     assert run_pilot(dataset, output, config, resume=True)["training"] == stages
     corrupted = output/stages[-1]["directory"]/"training.json"
     corrupted.write_text(corrupted.read_text()+" ")
@@ -239,12 +239,12 @@ def test_pilot_interrupted_attempt_is_preserved(dataset, tmp_path, monkeypatch):
             raise RuntimeError("interrupted stage")
         return original(dataset, directory, config, **kwargs)
 
-    monkeypatch.setattr("powersim.pilot.train_model", interrupt)
+    monkeypatch.setattr("powersim.research.pilot.train_model", interrupt)
     with pytest.raises(RuntimeError, match="interrupted stage"):
         run_pilot(dataset, output, config)
     partial = next(output.rglob("partial.txt"))
     assert json.loads((output/"status.json").read_text())["status"] == "failed"
-    monkeypatch.setattr("powersim.pilot.train_model", original)
+    monkeypatch.setattr("powersim.research.pilot.train_model", original)
     run_pilot(dataset, output, config, resume=True)
     assert partial.read_text() == "keep"
     state = json.loads((output/"status.json").read_text())
@@ -270,7 +270,7 @@ def test_cli_train_exposes_warm_start_and_method(dataset, tmp_path, monkeypatch,
         recorded.update(configuration=asdict(config), **kwargs)
         return {}
 
-    monkeypatch.setattr("powersim.ml.train_model", fake)
+    monkeypatch.setattr("powersim.solvers.gao_double_neural.ml.train_model", fake)
     assert main(["train", str(dataset), str(tmp_path/"out"), "--method", "M2",
                  "--initialize-from", "M1/model.pt", "--learning-rate", ".01",
                  "--epochs", "200", "--hidden", "8,8,8", "--checkpoint-selection", "last"]) == 0
@@ -282,7 +282,7 @@ def test_cli_train_exposes_warm_start_and_method(dataset, tmp_path, monkeypatch,
 
 
 def test_read_only_gao_model_snapshots_preserve_checkpoint_and_training_defaults(dataset, parent, tmp_path):
-    from powersim.gao_audit import audit_preprocessing
+    from powersim.research.gao_audit import audit_preprocessing
 
     before = artifact_hash(parent)
     defaults = asdict(TrainConfig())

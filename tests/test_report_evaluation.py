@@ -7,9 +7,9 @@ import pytest
 
 from powersim.config import SimulationConfig
 from powersim.data import DatasetConfig, generate_dataset
-from powersim.report_evaluation import comparisons, main
-from powersim.report_inputs import Inventory
-from powersim.report_metrics import (Physics, accuracy_summary, change, gate_classification,
+from powersim.output_generation.report_evaluation import comparisons, main
+from powersim.output_generation.report_inputs import Inventory
+from powersim.output_generation.report_metrics import (Physics, accuracy_summary, change, gate_classification,
                                      gate_mask, physics_summary, ranking_metrics, speedup)
 
 
@@ -149,7 +149,7 @@ def test_report_plan_and_reference_only_analysis_do_not_solve(tmp_path, monkeypa
     def unexpected(*args, **kwargs):
         raise AssertionError("Report must not call the optimizer")
 
-    monkeypatch.setattr("powersim.solver.solve_reference", unexpected)
+    monkeypatch.setattr("powersim.core.solve.solve_reference", unexpected)
     args = ["--artifacts", str(tmp_path), "--reference-dataset", str(dataset),
             "--output", str(output), "--no-figures"]
     assert main([*args, "--plan"]) == 0

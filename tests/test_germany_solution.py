@@ -8,7 +8,7 @@ from powersim.config import SimulationConfig
 from powersim.contracts import DispatchDecision
 from powersim.data import DatasetConfig, generate_dataset
 from powersim.dc import dc_relation
-from powersim.german_case import germany_case_data
+from powersim.instance_generation.german_case import germany_case_data
 from powersim.network import make_case, nodal_loads
 from powersim.solution_view import dataset_solution, solution_figure
 from powersim.solver import evaluate_decision, solve_reference

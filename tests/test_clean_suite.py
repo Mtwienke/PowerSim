@@ -6,10 +6,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from powersim.clean_suite import BENCHMARKS, CleanConfig, data_config, main, plan
-from powersim.data import DatasetConfig, generate_dataset, load_dataset, split_record_file
-from powersim.ml import OPFNetwork, active_branch_loss, chain_jacobian, masked_residual_loss, physical_jacobian
-from powersim.report_inputs import Inventory
+from powersim.instance_generation.data import DatasetConfig, generate_dataset, load_dataset, split_record_file
+from powersim.output_generation.report_inputs import Inventory
+from powersim.research.clean_suite import BENCHMARKS, CleanConfig, data_config, main, plan
+from powersim.solvers.gao_double_neural.ml import (
+    OPFNetwork, active_branch_loss, chain_jacobian, masked_residual_loss, physical_jacobian,
+)
 
 
 def test_full_plan_fresh_rates_workers_and_demand_shift(tmp_path, capsys):

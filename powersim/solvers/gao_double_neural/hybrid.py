@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from .ml import reconstruction_errors, tensor
-from .network import digest
+from ...instance_generation.network import digest
 
 
 @dataclass(frozen=True)

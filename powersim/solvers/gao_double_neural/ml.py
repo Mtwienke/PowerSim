@@ -12,9 +12,10 @@ try:
 except ImportError as exc:
     raise ImportError("Training/inference requires: pip install -e '.[ml]'") from exc
 
-from .data import load_dataset, package_versions, write_json
-from .metrics import accuracy
-from .network import digest
+from ...instance_generation.data import load_dataset, package_versions, write_json
+from ...instance_generation.network import digest
+from ...output_generation.metrics import accuracy
+from .sensitivity import example_sensitivity_mask
 
 
 def tensor(value):
@@ -338,7 +339,6 @@ def train_model(dataset, output, config: TrainConfig | None = None, *, initializ
     reference_j = tensor(a["train_jacobian"])
     valid_j = tensor(a["train_jacobian_valid"]).bool()
     if config.sensitivity_policy == "example":
-        from .gao_audit import example_sensitivity_mask
         valid_j &= torch.as_tensor(example_sensitivity_mask(a["train_jacobian"]))
     active_g = tensor(a["train_lower"] | a["train_upper"]).bool()
     active_b = tensor(a["train_active_branch"]).bool()

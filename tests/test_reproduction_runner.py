@@ -7,10 +7,10 @@ import pytest
 pytest.importorskip("torch")
 
 from powersim.data import package_versions
-from powersim.ml import artifact_hash
-from powersim.reproduction import (
+from powersim.research.reproduction import (
     METHODS, PROFILES, StageRunner, SuiteConfig, main, run_suite, suite_plan, verify_suite,
 )
+from powersim.solvers.gao_double_neural.ml import artifact_hash
 
 
 def test_frozen_plan_distinguishes_all_hypotheses_and_keeps_germany_out(tmp_path, capsys):
@@ -73,7 +73,7 @@ class FakeCommands(StageRunner):
 
 
 def test_full_workload_resume_and_hash_validation_with_no_real_training(tmp_path, monkeypatch):
-    import powersim.reproduction as module
+    import powersim.research.reproduction as module
     monkeypatch.setattr(module, "_freeze", fake_freeze)
     monkeypatch.setattr(module, "StageRunner", FakeCommands)
     root = tmp_path/"suite"
@@ -98,7 +98,7 @@ def test_full_workload_resume_and_hash_validation_with_no_real_training(tmp_path
 
 
 def test_failed_attempt_is_preserved_and_restarts_in_new_directory(tmp_path, monkeypatch):
-    import powersim.reproduction as module
+    import powersim.research.reproduction as module
     monkeypatch.setattr(module, "_freeze", fake_freeze)
     monkeypatch.setattr(module, "StageRunner", FakeCommands)
     FakeCommands.fail_once = "source-informed--M2--train"

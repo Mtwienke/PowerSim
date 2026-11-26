@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from powersim.gao_audit import (
+from powersim.research.gao_audit import (
     audit_preprocessing, example_sensitivity_mask, jacobian_loss_snapshot,
     sensitivity_policy_summary, supervised_loss_scales,
 )
@@ -90,7 +90,7 @@ def simple_dataset(tmp_path):
 
 
 def test_audit_loads_only_train_validation_and_preserves_inputs(simple_dataset, tmp_path, monkeypatch):
-    from powersim.gao_audit import _sha
+    from powersim.research.gao_audit import _sha
     original = np.load
     loaded = []
 
@@ -110,7 +110,7 @@ def test_audit_loads_only_train_validation_and_preserves_inputs(simple_dataset, 
             loaded.append(key)
             return self.archive[key]
 
-    monkeypatch.setattr("powersim.gao_audit.np.load", Guard)
+    monkeypatch.setattr("powersim.research.gao_audit.np.load", Guard)
     before = {name: _sha(simple_dataset/name) for name in ("manifest.json", "dataset.npz")}
     output = tmp_path/"audit"
     report = audit_preprocessing(simple_dataset, output)

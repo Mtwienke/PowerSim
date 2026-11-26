@@ -74,8 +74,8 @@ and PEGASE cases remain unscaled. For Germany see [the v2 provenance and license
 ```sh
 source .venv/bin/activate
 RUN=artifacts/clean-suite-YYYYMMDD
-python -m powersim.clean_suite "$RUN" --plan --workers 4
-python -m powersim.clean_suite "$RUN" --workers 4
+python -m powersim.research.clean_suite "$RUN" --plan --workers 4
+python -m powersim.research.clean_suite "$RUN" --workers 4
 ```
 
 Use a new output directory. `--smoke` uses a different data seed, tiny
@@ -98,7 +98,7 @@ with a blocked grid says `complete_with_unavailable`, not that all grids ran.
 After completion, produce a report containing **only** the new cohorts:
 
 ```sh
-python -m powersim.report_evaluation --clean-suite "$RUN" \
+python -m powersim.output_generation.report_evaluation --clean-suite "$RUN" \
   --output artifacts/clean-report-YYYYMMDD
 ```
 

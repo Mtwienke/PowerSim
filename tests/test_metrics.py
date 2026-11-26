@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from powersim.metrics import accuracy, selection_curve
+from powersim.output_generation.metrics import accuracy, selection_curve
 
 
 def test_generator_joint_and_legacy_boundary_are_distinct():

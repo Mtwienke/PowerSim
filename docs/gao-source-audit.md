@@ -254,7 +254,7 @@ call an unmodified example a verified final-paper protocol.
 ### Reproducible read-only preprocessing diagnostic
 
 ```sh
-python -m powersim.gao_audit DATASET NEW_AUDIT_OUTPUT \
+python -m powersim.research.gao_audit DATASET NEW_AUDIT_OUTPUT \
   --model MATCHING_M1/model.pt --model MATCHING_M5/model.pt
 ```
 

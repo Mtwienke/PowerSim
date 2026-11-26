@@ -26,7 +26,7 @@ The electrical source is Xiong, Fioriti, Neumann, Riepin and Brown,
 [*Prebuilt Electricity Network for PyPSA-Eur based on OpenStreetMap Data*,
 v0.7](https://doi.org/10.5281/zenodo.18619025), ODbL 1.0, with
 [© OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
-See the [data license notice](../powersim/benchmarks/germany30.LICENSE.md) and
+See the [data license notice](../powersim/instance_generation/benchmarks/germany30.LICENSE.md) and
 [source methodology paper](https://doi.org/10.1038/s41597-025-04550-7).
 The source's line ratings and reactances are themselves estimated/modelled
 parameters; they are not certified operator limits.
@@ -117,7 +117,7 @@ into a local directory, then run:
 
 ```sh
 python scripts/build_germany30.py path/to/source-csvs artifacts/germany30-rebuilt.json
-cmp powersim/benchmarks/germany30.json artifacts/germany30-rebuilt.json
+cmp powersim/instance_generation/benchmarks/germany30.json artifacts/germany30-rebuilt.json
 ```
 
 The builder checks source checksums and refuses to overwrite its destination.

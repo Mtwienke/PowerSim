@@ -8,8 +8,8 @@ from time import perf_counter
 
 import numpy as np
 
-from .data import package_versions
-from .network import digest
+from ..instance_generation.data import package_versions
+from ..instance_generation.network import digest
 from .report_metrics import accuracy_summary, speedup
 
 
@@ -57,11 +57,12 @@ def benchmark(entry, dataset, labels, physics, *, repeats=3, limit=2000):
     """Time actual solver, NN, decoder and complete hybrid on identical rows."""
     import torch
 
-    from .config import SimulationConfig
-    from .hybrid import HybridPredictor
-    from .ml import RECONSTRUCTION_SCORES, load_decoder, load_model, reconstruction_errors, tensor
-    from .network import NodalLoadWriter
-    from .solver import solve_reference
+    from ..core.config import SimulationConfig
+    from ..core.solve import solve_reference
+    from ..instance_generation.network import NodalLoadWriter
+    from ..solvers.gao_double_neural.hybrid import HybridPredictor
+    from ..solvers.gao_double_neural.ml import (RECONSTRUCTION_SCORES, load_decoder, load_model,
+                                               reconstruction_errors, tensor)
 
     torch.set_num_threads(1)
     x, ids = labels.x[:limit], labels.ids[:limit]

@@ -7,12 +7,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from powersim.attacks import fgsm_inputs, generate_fgsm_dataset
 from powersim.data import DatasetConfig, generate_dataset, load_dataset
-from powersim.experiments import _physical_summary, evaluate_model
-from powersim.metrics import accuracy
-from powersim.ml import TrainConfig, artifact_hash, train_decoder, train_model
+from powersim.output_generation.metrics import accuracy
+from powersim.research.attacks import fgsm_inputs, generate_fgsm_dataset
+from powersim.research.experiments import _physical_summary, evaluate_model
 from powersim.solver import BranchResult, SolveResult
+from powersim.solvers.gao_double_neural.ml import TrainConfig, artifact_hash, train_decoder, train_model
 
 
 def test_fgsm_direction_budget_and_no_input_clipping():
@@ -83,7 +83,7 @@ def test_compressed_evaluations_and_predeclared_norm_diagnostics(source, tmp_pat
 def test_attack_references_are_resolved_at_new_inputs_and_fixed_targets_separate(source, tmp_path, monkeypatch):
     dataset, model, _ = source
     before = artifact_hash(model)
-    import powersim.attacks as module
+    import powersim.research.attacks as module
     called = []
     original = module._solve_scenario
 

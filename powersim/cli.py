@@ -1,12 +1,13 @@
 """Headless research commands. ML imports are intentionally lazy."""
 import argparse
+from importlib import import_module
 import json
 from pathlib import Path
 
-from .config import BENCHMARKS, SimulationConfig
-from .data import DatasetConfig, generate_dataset
-from .network import make_case
-from .solver import solve_reference
+from .core.config import BENCHMARKS, SimulationConfig
+from .core.solve import solve_reference
+from .instance_generation.data import DatasetConfig, generate_dataset, load_dataset_instance
+from .instance_generation.network import make_case
 
 
 def _hidden_widths(value):
@@ -26,13 +27,31 @@ def _learning_rates(value):
         raise argparse.ArgumentTypeError("Use comma-separated learning rates") from exc
 
 
+def _solver_callable(value):
+    module, _, name = value.partition(":")
+    if not module or not name:
+        raise argparse.ArgumentTypeError("Use MODULE:CALLABLE for an alternative solver")
+    try:
+        solver = getattr(import_module(module), name)
+    except (ImportError, AttributeError) as exc:
+        raise argparse.ArgumentTypeError(f"Cannot import solver {value!r}: {exc}") from exc
+    if not callable(solver):
+        raise argparse.ArgumentTypeError(f"Solver {value!r} must be callable")
+    return solver
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="powersim")
     commands = parser.add_subparsers(dest="command", required=True)
     solve = commands.add_parser("reference", help="Solve and validate numerical OPF")
-    solve.add_argument("--physics", choices=["dc", "ac"], default="dc")
-    solve.add_argument("--benchmark", choices=BENCHMARKS, default="case30")
-    solve.add_argument("--branch-limit-scale", type=float, default=1.)
+    solve.add_argument("--physics", choices=["dc", "ac"], help="Physics for a bundled case (default: dc)")
+    solve.add_argument("--benchmark", choices=BENCHMARKS, help="Bundled case (default: case30)")
+    solve.add_argument("--branch-limit-scale", type=float, help="Branch limit multiplier (default: 1)")
+    solve.add_argument("--solver", type=_solver_callable, metavar="MODULE:CALLABLE",
+                       help="Alternative OPF dispatch solver (default: pandapower)")
+    solve.add_argument("--dataset", type=Path, help="Solve a saved attempt using the dataset's network/configuration")
+    solve.add_argument("--split", help="Saved split (default: iid_test)")
+    solve.add_argument("--sample", type=int, help="Original zero-based attempt number (default: 0)")
     data = commands.add_parser("dataset", help="Generate seeded DC-OPF labels")
     data.add_argument("directory")
     data.add_argument("--preset", choices=["smoke", "paper"], default="smoke")
@@ -116,15 +135,26 @@ def main(argv=None):
     infer.add_argument("--production-log", required=True)
     args = parser.parse_args(argv)
     if args.command == "reference":
-        config = SimulationConfig(args.physics, args.benchmark, branch_limit_scale=args.branch_limit_scale)
-        result = solve_reference(make_case(config), config)
+        choices = {"physics_mode": args.physics, "benchmark": args.benchmark,
+                   "branch_limit_scale": args.branch_limit_scale}
+        overrides = {name: value for name, value in choices.items() if value is not None}
+        if args.dataset is not None:
+            if overrides:
+                parser.error("--dataset uses its saved physics, benchmark and branch limits")
+            instance = load_dataset_instance(args.dataset, args.split or "iid_test", args.sample or 0)
+            result = solve_reference(instance, solver=args.solver)
+        else:
+            if args.split is not None or args.sample is not None:
+                parser.error("--split and --sample require --dataset")
+            config = SimulationConfig(**overrides)
+            result = solve_reference(make_case(config), config, solver=args.solver)
         print(json.dumps(result.to_dict(), indent=2, allow_nan=False))
         return 0 if result.status == "ok" else 1
     if args.command == "dataset":
         values = {"seed": args.seed, "simulation": SimulationConfig(benchmark=args.benchmark,
                                                                    branch_limit_scale=args.branch_limit_scale)}
         if args.config:
-            from .data import RenewableConfig
+            from .instance_generation.data import RenewableConfig
             overrides = json.loads(Path(args.config).read_text())
             if "simulation" in overrides:
                 overrides["simulation"] = SimulationConfig(**overrides["simulation"])
@@ -135,7 +165,7 @@ def main(argv=None):
         print(json.dumps(manifest["splits"], indent=2))
         return 0
     if args.command == "train":
-        from .ml import METHOD_WEIGHTS, TrainConfig, train_model
+        from .solvers.gao_double_neural.ml import METHOD_WEIGHTS, TrainConfig, train_model
         weights = dict(METHOD_WEIGHTS[args.method])
         if args.loss_weights:
             weights.update(json.loads(args.loss_weights))
@@ -148,7 +178,7 @@ def main(argv=None):
         print(json.dumps({k: v for k, v in report.items() if k != "history"}, indent=2))
         return 0
     if args.command == "decoder":
-        from .ml import train_decoder
+        from .solvers.gao_double_neural.ml import train_decoder
         values = {"epochs": args.epochs, "batch_size": args.batch_size, "hidden": args.hidden,
                   "quantile": args.quantile, "units": args.error_units, "seed": args.seed,
                   "threshold": args.threshold, "learning_rate": args.learning_rate}
@@ -158,7 +188,7 @@ def main(argv=None):
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "pilot":
-        from .pilot import PilotConfig, pilot_plan, run_pilot
+        from .research.pilot import PilotConfig, pilot_plan, run_pilot
         config = PilotConfig(seed=args.seed, pretrain_epochs=args.pretrain_epochs,
                              fine_tune_epochs=args.fine_tune_epochs, learning_rates=args.learning_rates,
                              hidden=args.hidden, activation=args.activation, batch_size=args.batch_size,
@@ -169,7 +199,7 @@ def main(argv=None):
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "evaluate":
-        from .experiments import evaluate_model
+        from .research.experiments import evaluate_model
         report = evaluate_model(args.dataset, args.model, args.output, split=args.split,
                                  decoder_path=args.decoder, workers=args.workers,
                                  prediction_format=args.prediction_format,
@@ -177,7 +207,7 @@ def main(argv=None):
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "plot-solution":
-        from .solution_view import dataset_solution, solution_figure
+        from .output_generation.solution_view import dataset_solution, solution_figure
         if args.output.exists():
             parser.error(f"Output already exists: {args.output}")
         if args.dataset:
@@ -194,17 +224,17 @@ def main(argv=None):
         print(f"{result['status']}: {args.output}")
         return 0 if result["status"] == "ok" else 1
     if args.command == "calibrate":
-        from .ml import recalibrate_decoder
+        from .solvers.gao_double_neural.ml import recalibrate_decoder
         report = recalibrate_decoder(args.dataset, args.model, args.decoder, args.output,
                                       quantile=args.quantile, units=args.error_units, threshold=args.threshold)
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "infer":
         from dataclasses import asdict
-        from .data import load_dataset
-        from .hybrid import HybridPredictor
-        from .ml import load_decoder, load_model
-        from .network import apply_nodal_loads
+        from .instance_generation.data import load_dataset
+        from .instance_generation.network import apply_nodal_loads
+        from .solvers.gao_double_neural.hybrid import HybridPredictor
+        from .solvers.gao_double_neural.ml import load_decoder, load_model
         manifest, _ = load_dataset(args.dataset)
         if Path(args.production_log).resolve().is_relative_to(Path(args.dataset).resolve()):
             raise ValueError("Production rejection log must be separate from dataset/held-out artifacts")

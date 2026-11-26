@@ -9,12 +9,12 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from powersim.data import DatasetConfig, generate_dataset, load_dataset
-from powersim.ml import (
+from powersim.solvers.gao_double_neural.ml import (
     METHOD_WEIGHTS, Decoder, OPFNetwork, TrainConfig, artifact_hash, branch_flow_penalty,
     jacobian_losses, load_decoder, load_model, reconstruction_errors, supervised_loss,
     tensor, train_decoder, train_model,
 )
-from powersim.optim import KerasV2Adam
+from powersim.solvers.gao_double_neural.optim import KerasV2Adam
 
 
 def test_keras_adam_epsilon_hat_decay_and_saved_iterations_match_equations():

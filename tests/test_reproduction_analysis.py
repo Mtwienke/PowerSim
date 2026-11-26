@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("torch")
 
-from powersim.reproduction_analysis import analyze_suite, pooled_reports
+from powersim.research.reproduction_analysis import analyze_suite, pooled_reports
 
 
 def test_pooled_accuracy_uses_counts_and_rmse_uses_squared_errors():
