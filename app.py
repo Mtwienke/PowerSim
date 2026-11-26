@@ -1,20 +1,20 @@
 import streamlit as st
 import plotly.express as px
-from powersim.simulator import make_case, evaluate
-from controllers.my_dispatch import MyDispatchPolicy
-from powersim.geography import load_mapping, plot_map
 from pathlib import Path
-from powersim.config import BENCHMARKS, SimulationConfig
-from powersim.solver import solve_reference
-from powersim.network import build_dispatch_inputs, nodal_loads, nodal_power
-from powersim.solution_view import solution_figure
+from powersim.core.config import BENCHMARKS, SimulationConfig
+from powersim.core.simulator import evaluate
+from powersim.core.solve import solve_reference
+from powersim.instance_generation.network import build_dispatch_inputs, make_case, nodal_loads, nodal_power
+from powersim.output_generation.geography import load_mapping, plot_map
+from powersim.output_generation.solution_view import solution_figure
+from powersim.solvers.heuristic import MyDispatchPolicy
 from copy import deepcopy
 from dataclasses import asdict
 
 
 def evaluate_hybrid(net, config, predictor):
-    from powersim.contracts import DispatchDecision
-    from powersim.solver import evaluate_decision
+    from powersim.core.contracts import DispatchDecision
+    from powersim.core.power_flow import evaluate_decision
 
     fallback = None
 
@@ -54,8 +54,8 @@ learned = None
 learned_message = "Unavailable — provide trained model + calibrated decoder"
 if physics == "dc" and model_path and decoder_path:
     try:
-        from powersim.ml import load_model, load_decoder
-        from powersim.hybrid import HybridPredictor
+        from powersim.solvers.gao_double_neural.hybrid import HybridPredictor
+        from powersim.solvers.gao_double_neural.ml import load_model, load_decoder
         model, checkpoint = load_model(model_path)
         decoder, metadata = load_decoder(decoder_path, model_path, model)
         context = build_dispatch_inputs(net, base_config)["context"]

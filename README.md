@@ -93,12 +93,12 @@ explicit 185/230/300 MW capacity and per-unit/ReLU hypotheses, and separately
 reports source-informed, journal-equation and literal-example numerical variants.
 
 ```sh
-python -m powersim.reproduction artifacts/gao-reconstruction --plan
-python -m powersim.reproduction artifacts/gao-reconstruction
+python -m powersim.research.reproduction artifacts/gao-reconstruction --plan
+python -m powersim.research.reproduction artifacts/gao-reconstruction
 # After an interrupted driver and all its children have stopped:
-python -m powersim.reproduction artifacts/gao-reconstruction --resume
+python -m powersim.research.reproduction artifacts/gao-reconstruction --resume
 # After completion: verify hashes and generate descriptive JSON/Markdown reports.
-python -m powersim.reproduction_analysis artifacts/gao-reconstruction
+python -m powersim.research.reproduction_analysis artifacts/gao-reconstruction
 ```
 
 This opt-in workload freezes committed source: **18 trainings, 18 decoders,
@@ -124,8 +124,8 @@ Run from this checkout with those run directories under `artifacts/`:
 
 ```sh
 python -m pip install -e '.[dev,report]'
-python -m powersim.report_evaluation --plan
-python -m powersim.report_evaluation --output artifacts/report_evaluation_recheck
+python -m powersim.output_generation.report_evaluation --plan
+python -m powersim.output_generation.report_evaluation --output artifacts/report_evaluation_recheck
 ```
 
 The last command re-analyzes saved predictions and labels. Add `--benchmark-runtime`
@@ -143,8 +143,8 @@ grid; an unsupported reference is recorded rather than silently modifying the
 grid or borrowing historical labels.
 
 ```sh
-python -m powersim.clean_suite artifacts/clean-suite --workers 4 --plan
-python -m powersim.clean_suite artifacts/clean-suite --workers 4
+python -m powersim.research.clean_suite artifacts/clean-suite --workers 4 --plan
+python -m powersim.research.clean_suite artifacts/clean-suite --workers 4
 ```
 
 Historical data, runs and the old report have moved to `artifacts/archive/`.
@@ -205,6 +205,19 @@ or replays a saved dataset reference without re-solving it:
 powersim plot-solution artifacts/sample.html --dataset artifacts/germany-data --split train --sample 0
 ```
 
+## Package layout
+
+| Directory | Responsibility |
+| --- | --- |
+| [`powersim/core/`](powersim/core/) | Shared `OPFInstance`, dispatch and result contracts, solver orchestration, and DC/AC power-flow checks. |
+| [`powersim/instance_generation/`](powersim/instance_generation/) | Bundled benchmarks, seeded dataset generation, and loading previously saved attempts. |
+| [`powersim/output_generation/`](powersim/output_generation/) | Solution graphics, maps, evaluation metrics, and report assembly. |
+| [`powersim/solvers/`](powersim/solvers/) | `numerical/` for the pandapower OPF backend, `gao_double_neural/` for learned models, decoder and hybrid inference, and `heuristic.py` for the merit-order policy. |
+| [`powersim/research/`](powersim/research/) | Research protocols, benchmark runs, and reproducibility audits. |
+
+The `powersim` CLI and `app.py` connect these packages. Use the package paths
+above for new code.
+
 ## Add an OPF solver
 
 Define a solver as a callable that accepts an `OPFInstance` and returns a
@@ -213,9 +226,14 @@ including the external grid. For AC, also return any optimized generator voltage
 targets in per unit. Return `DispatchFailure` if the algorithm cannot produce a
 dispatch.
 
+For a solver maintained in this repo, put its code under
+`powersim/solvers/<solver_family>/`. Import `OPFInstance` from
+`powersim.core.problem` and the decision/failure types from
+`powersim.core.contracts`. An external solver can use the same interface.
+
 ```python
-from powersim.data import load_dataset_instance
-from powersim.solver import solve_reference
+from powersim.core.solve import solve_reference
+from powersim.instance_generation.data import load_dataset_instance
 from my_solver import dispatch
 
 instance = load_dataset_instance("artifacts/data", split="iid_test", sample=0)
@@ -224,12 +242,12 @@ alternative = solve_reference(instance, solver=dispatch)
 print(alternative.to_dict())
 ```
 
-Create a new instance with `OPFInstance(net, config)` from `powersim.problem`.
+Create a new instance with `OPFInstance(net, config)` from `powersim.core.problem`.
 An instance snapshots the grid and load inputs. It exposes the ordered bus IDs
 in `instance.context.bus_ids`, ordered `net_load_mw`, and `generators` with
 bounds and polynomial costs. Use `instance.copy_network()` for topology, reactive
 loads, or mutable scratch work. For DC, `dc_relation(instance.copy_network())`
-from `powersim.dc` provides branch MW limits (`None` means unrated) and the
+from `powersim.core.dc` provides branch MW limits (`None` means unrated) and the
 linear model: `flows = m_g @ generation - m_d @ net_load + constant`. Balance
 requires `sum(generation) = sum(net_load) + balance_constant_mw`.
 
@@ -262,8 +280,8 @@ assumptions. The stress preset scales branch limits to 90% of bundled limits;
 manifests report actual active sets and label failures rather than assuming
 congestion. No repair/projection or automatic retraining is implemented.
 
-Custom heuristics remain in `controllers/my_dispatch.py`, receiving frozen DTOs,
-never a mutable pandapower network. The supported benchmarks are bundled
+The merit-order heuristic in `powersim/solvers/heuristic.py` receives frozen
+dispatch observations. The supported benchmarks are bundled
 balanced quasi-static models with polynomial conventional-source costs; the
 research adapter is not a production grid operating tool.
 

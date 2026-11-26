@@ -4,12 +4,12 @@ import time
 
 from pandapower import pandapowerNet
 
-from ..config import SimulationConfig
-from ..contracts import DispatchDecision, DispatchFailure
-from ..network import build_dispatch_inputs
-from ..problem import OPFInstance, OPFSolver
+from ..instance_generation.network import build_dispatch_inputs
 from ..solvers.numerical.pandapower import run_opf
+from .config import SimulationConfig
+from .contracts import DispatchDecision, DispatchFailure
 from .power_flow import collect_result, evaluate_decision
+from .problem import OPFInstance, OPFSolver
 from .results import SolveResult
 
 

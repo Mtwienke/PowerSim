@@ -8,9 +8,10 @@ torch = pytest.importorskip("torch")
 
 from powersim.data import DatasetConfig, generate_dataset, load_dataset
 from powersim.dc import DCRelation, reference_jacobian
-from powersim.experiments import accuracy, evaluate_model
-from powersim.hybrid import HybridPredictor
-from powersim.ml import (
+from powersim.output_generation.metrics import accuracy
+from powersim.research.experiments import evaluate_model
+from powersim.solvers.gao_double_neural.hybrid import HybridPredictor
+from powersim.solvers.gao_double_neural.ml import (
     OPFNetwork, TrainConfig, Decoder, artifact_hash, calibrate_threshold, jacobian_losses,
     load_decoder, load_model, physical_jacobian, recalibrate_decoder, tensor, train_decoder, train_model,
 )

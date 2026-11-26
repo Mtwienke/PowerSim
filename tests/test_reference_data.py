@@ -182,7 +182,7 @@ def test_unsupported_devices_or_optimized_inputs_fail_explicitly(unsupported):
 
 
 def test_failed_samples_are_preserved_but_not_training_labels(tmp_path, monkeypatch):
-    import powersim.data as module
+    import powersim.instance_generation.data as module
     from powersim.solver import SolveResult
     real = module.solve_reference
     calls = []

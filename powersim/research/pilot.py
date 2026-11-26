@@ -8,8 +8,11 @@ import time
 
 import numpy as np
 
-from .data import load_dataset, package_versions, write_json
-from .ml import METHOD_WEIGHTS, TrainConfig, artifact_hash, dataset_identity, train_model, training_data_hash
+from ..instance_generation.data import load_dataset, package_versions, write_json
+from ..solvers.gao_double_neural.ml import (METHOD_WEIGHTS, TrainConfig, artifact_hash, dataset_identity,
+                                           train_model, training_data_hash)
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -44,8 +47,7 @@ def pilot_plan(dataset, config: PilotConfig | None = None):
         raise ValueError("The paper training pilot requires a DC dataset")
     if not len(arrays["train_x"]) or not len(arrays["validation_x"]):
         raise ValueError("The pilot requires nonempty training and validation splits")
-    source_root = Path(__file__).parent
-    sources = sorted(source_root.rglob("*.py"))
+    sources = sorted(PACKAGE_ROOT.rglob("*.py"))
     plan = {
         "schema_version": "1.0",
         "paper_doi": "10.1109/TNNLS.2024.3437741",
@@ -57,7 +59,7 @@ def pilot_plan(dataset, config: PilotConfig | None = None):
         "benchmark": manifest["configuration"]["simulation"]["benchmark"],
         "reference_coverage": {split: {key: stats[key] for key in ("requested", "valid")}
                                for split, stats in manifest["splits"].items()},
-        "source_sha256": {str(path.relative_to(source_root)): artifact_hash(path) for path in sources},
+        "source_sha256": {str(path.relative_to(PACKAGE_ROOT)): artifact_hash(path) for path in sources},
         "versions": package_versions(),
         "planned_stages": len(config.learning_rates)*5,
         "fine_tuning_methods": {
@@ -120,7 +122,7 @@ def run_pilot(dataset, output, config: PilotConfig | None = None, *, resume=Fals
                 if artifact_hash(Path(plan["dataset"]) / file) != checksum:
                     raise ValueError(f"Dataset artifact changed during pilot: {file}")
             for file, checksum in plan["source_sha256"].items():
-                if artifact_hash(Path(__file__).parent / file) != checksum:
+                if artifact_hash(PACKAGE_ROOT / file) != checksum:
                     raise ValueError(f"Source changed during pilot: {file}")
             if package_versions() != plan["versions"]:
                 raise ValueError("Package versions changed during pilot")

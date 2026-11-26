@@ -19,7 +19,7 @@ python -m pip install -e '.[dev,report]'
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
 
 # Inventory only; no output files, inference or solver calls.
-python -m powersim.report_evaluation --plan
+python -m powersim.output_generation.report_evaluation --plan
 
 # Optional: generate the small, reference-only current Germany-30 cohort.
 # Skip if it already exists.
@@ -27,11 +27,11 @@ python -m powersim.cli dataset artifacts/report-germany30-v2-seed2027 \
   --benchmark germany30 --config examples/report-germany30-v2.json --workers 4
 
 # Regenerate into a NEW output directory. No reference OPF calls or training.
-python -m powersim.report_evaluation \
+python -m powersim.output_generation.report_evaluation \
   --output artifacts/report_evaluation_recheck
 
 # Full workbook with fresh matched-workload CPU timing; no training.
-python -m powersim.report_evaluation --benchmark-runtime \
+python -m powersim.output_generation.report_evaluation --benchmark-runtime \
   --output artifacts/report_evaluation_timed_recheck
 
 pytest -q

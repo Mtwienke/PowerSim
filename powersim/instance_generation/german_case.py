@@ -7,7 +7,7 @@ import pandapower as pp
 
 
 def germany_case_data():
-    return json.loads(files("powersim").joinpath("benchmarks/germany30.json").read_text(encoding="utf-8"))
+    return json.loads(files(__package__).joinpath("benchmarks/germany30.json").read_text(encoding="utf-8"))
 
 
 def make_germany30():

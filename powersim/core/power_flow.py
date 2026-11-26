@@ -6,10 +6,10 @@ import pandapower as pp
 from pandapower.pypower.idx_brch import PF, PT, RATE_A
 from pandapower.pypower.idx_bus import GS
 
-from ..config import SimulationConfig
-from ..contracts import DispatchDecision
-from ..dc import dc_branch_limit_mw
-from ..network import build_dispatch_inputs, digest, nodal_loads, ordered_buses
+from ..instance_generation.network import build_dispatch_inputs, digest, nodal_loads, ordered_buses
+from .config import SimulationConfig
+from .contracts import DispatchDecision
+from .dc import dc_branch_limit_mw
 from .results import BranchResult, SolveResult
 
 # All active masks are local, tolerance-based, and aligned to explicit IDs.

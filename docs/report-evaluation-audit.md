@@ -32,7 +32,7 @@ All main suites have dataset manifests, stage checksum indexes, reference arrays
 
 ## Germany: model provenance and scope
 
-Xiong, Fioriti, Neumann, Riepin and Brown, *Prebuilt Electricity Network for PyPSA-Eur based on OpenStreetMap Data*, v0.7 ([Zenodo DOI](https://doi.org/10.5281/zenodo.18619025), [methodology DOI](https://doi.org/10.1038/s41597-025-04550-7)), ODbL 1.0; © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). See `powersim/benchmarks/germany30.LICENSE.md` for the bundled derivation's notice.
+Xiong, Fioriti, Neumann, Riepin and Brown, *Prebuilt Electricity Network for PyPSA-Eur based on OpenStreetMap Data*, v0.7 ([Zenodo DOI](https://doi.org/10.5281/zenodo.18619025), [methodology DOI](https://doi.org/10.1038/s41597-025-04550-7)), ODbL 1.0; © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). See [the bundled derivation's license notice](../powersim/instance_generation/benchmarks/germany30.LICENSE.md).
 
 Historical v1 artifacts must use their serialized `network.json`, not the revised bundle:
 

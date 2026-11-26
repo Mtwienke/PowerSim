@@ -1,7 +1,7 @@
 """Run pandapower's native OPF and retain its solved network tables."""
 import pandapower as pp
 
-from ...config import PhysicsMode
+from ...core.config import PhysicsMode
 
 
 def run_opf(net: pp.pandapowerNet, physics_mode: PhysicsMode) -> None:

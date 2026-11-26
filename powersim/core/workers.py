@@ -1,4 +1,4 @@
-"""Bounded, ordered process parallelism for independent pandapower cases."""
+"""Bounded, ordered process parallelism for independent cases."""
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager

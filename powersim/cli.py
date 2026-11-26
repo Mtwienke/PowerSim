@@ -4,10 +4,10 @@ from importlib import import_module
 import json
 from pathlib import Path
 
-from .config import BENCHMARKS, SimulationConfig
-from .data import DatasetConfig, generate_dataset, load_dataset_instance
-from .network import make_case
-from .solver import solve_reference
+from .core.config import BENCHMARKS, SimulationConfig
+from .core.solve import solve_reference
+from .instance_generation.data import DatasetConfig, generate_dataset, load_dataset_instance
+from .instance_generation.network import make_case
 
 
 def _hidden_widths(value):
@@ -154,7 +154,7 @@ def main(argv=None):
         values = {"seed": args.seed, "simulation": SimulationConfig(benchmark=args.benchmark,
                                                                    branch_limit_scale=args.branch_limit_scale)}
         if args.config:
-            from .data import RenewableConfig
+            from .instance_generation.data import RenewableConfig
             overrides = json.loads(Path(args.config).read_text())
             if "simulation" in overrides:
                 overrides["simulation"] = SimulationConfig(**overrides["simulation"])
@@ -165,7 +165,7 @@ def main(argv=None):
         print(json.dumps(manifest["splits"], indent=2))
         return 0
     if args.command == "train":
-        from .ml import METHOD_WEIGHTS, TrainConfig, train_model
+        from .solvers.gao_double_neural.ml import METHOD_WEIGHTS, TrainConfig, train_model
         weights = dict(METHOD_WEIGHTS[args.method])
         if args.loss_weights:
             weights.update(json.loads(args.loss_weights))
@@ -178,7 +178,7 @@ def main(argv=None):
         print(json.dumps({k: v for k, v in report.items() if k != "history"}, indent=2))
         return 0
     if args.command == "decoder":
-        from .ml import train_decoder
+        from .solvers.gao_double_neural.ml import train_decoder
         values = {"epochs": args.epochs, "batch_size": args.batch_size, "hidden": args.hidden,
                   "quantile": args.quantile, "units": args.error_units, "seed": args.seed,
                   "threshold": args.threshold, "learning_rate": args.learning_rate}
@@ -188,7 +188,7 @@ def main(argv=None):
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "pilot":
-        from .pilot import PilotConfig, pilot_plan, run_pilot
+        from .research.pilot import PilotConfig, pilot_plan, run_pilot
         config = PilotConfig(seed=args.seed, pretrain_epochs=args.pretrain_epochs,
                              fine_tune_epochs=args.fine_tune_epochs, learning_rates=args.learning_rates,
                              hidden=args.hidden, activation=args.activation, batch_size=args.batch_size,
@@ -199,7 +199,7 @@ def main(argv=None):
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "evaluate":
-        from .experiments import evaluate_model
+        from .research.experiments import evaluate_model
         report = evaluate_model(args.dataset, args.model, args.output, split=args.split,
                                  decoder_path=args.decoder, workers=args.workers,
                                  prediction_format=args.prediction_format,
@@ -207,7 +207,7 @@ def main(argv=None):
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "plot-solution":
-        from .solution_view import dataset_solution, solution_figure
+        from .output_generation.solution_view import dataset_solution, solution_figure
         if args.output.exists():
             parser.error(f"Output already exists: {args.output}")
         if args.dataset:
@@ -224,17 +224,17 @@ def main(argv=None):
         print(f"{result['status']}: {args.output}")
         return 0 if result["status"] == "ok" else 1
     if args.command == "calibrate":
-        from .ml import recalibrate_decoder
+        from .solvers.gao_double_neural.ml import recalibrate_decoder
         report = recalibrate_decoder(args.dataset, args.model, args.decoder, args.output,
                                       quantile=args.quantile, units=args.error_units, threshold=args.threshold)
         print(json.dumps(report, indent=2))
         return 0
     if args.command == "infer":
         from dataclasses import asdict
-        from .data import load_dataset
-        from .hybrid import HybridPredictor
-        from .ml import load_decoder, load_model
-        from .network import apply_nodal_loads
+        from .instance_generation.data import load_dataset
+        from .instance_generation.network import apply_nodal_loads
+        from .solvers.gao_double_neural.hybrid import HybridPredictor
+        from .solvers.gao_double_neural.ml import load_decoder, load_model
         manifest, _ = load_dataset(args.dataset)
         if Path(args.production_log).resolve().is_relative_to(Path(args.dataset).resolve()):
             raise ValueError("Production rejection log must be separate from dataset/held-out artifacts")

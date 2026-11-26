@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from powersim.geography import load_mapping, plot_map
+from powersim.output_generation.geography import load_mapping, plot_map
 
 
 EXAMPLE = Path(__file__).parents[1] / "examples/geography/synthetic_feeder.geojson"

@@ -21,7 +21,7 @@ powersim = "powersim.cli:main"
 include = ["powersim*", "controllers*"]
 
 [tool.setuptools.package-data]
-powersim = ["benchmarks/*.json", "benchmarks/*.md"]
+"powersim.instance_generation" = ["benchmarks/*.json", "benchmarks/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

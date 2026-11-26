@@ -38,7 +38,7 @@ def test_new_sampling_and_capacity_settings_are_validated(kwargs):
 
 
 def test_valid_count_replaces_failures_but_records_every_attempt(tmp_path, monkeypatch):
-    import powersim.data as module
+    import powersim.instance_generation.data as module
     from powersim.solver import SolveResult
 
     original = module.solve_reference
@@ -66,7 +66,7 @@ def test_valid_count_replaces_failures_but_records_every_attempt(tmp_path, monke
 
 def test_attempt_cap_is_finite_and_preserves_failure_diagnostics(tmp_path, monkeypatch):
     from powersim.solver import SolveResult
-    monkeypatch.setattr("powersim.data.solve_reference",
+    monkeypatch.setattr("powersim.instance_generation.data.solve_reference",
                         lambda *args: SolveResult("failed", False, "dc", "opf", .01, ("always fails",)))
     config = DatasetConfig(train_cases=2, validation_cases=1, test_cases=1,
                            sampling_policy="valid", max_attempt_factor=2)
